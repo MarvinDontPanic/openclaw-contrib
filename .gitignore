@@ -71,3 +71,8 @@ USER.md
 
 # local tooling
 .serena/
+
+# Marvin's local-only files
+DEV-SETUP.md
+MARVIN-CHANGES.md
+scripts/
