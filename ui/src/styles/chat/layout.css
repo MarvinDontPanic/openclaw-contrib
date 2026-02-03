@@ -47,6 +47,47 @@
   min-width: 180px;
 }
 
+/* New messages button - floating notification at top of chat */
+.chat-new-messages-wrapper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  padding-top: 1rem;
+  pointer-events: none; /* Allow scroll gestures to pass through */
+  z-index: 10;
+}
+
+.chat-new-messages {
+  padding: 0.5rem 1rem;
+  background: var(--button-secondary-bg, #333);
+  color: var(--button-secondary-text, #fff);
+  border: none;
+  border-radius: 2rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition:
+    background 0.2s,
+    transform 0.2s;
+  pointer-events: auto; /* Re-enable clicks on button itself */
+}
+
+.chat-new-messages:hover {
+  background: var(--button-secondary-hover-bg, #444);
+  transform: scale(1.02);
+}
+
+.chat-new-messages svg {
+  width: 1rem;
+  height: 1rem;
+}
+
 /* Chat thread - scrollable middle section, transparent */
 .chat-thread {
   flex: 1 1 0; /* Grow, shrink, and use 0 base for proper scrolling */

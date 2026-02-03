@@ -355,13 +355,15 @@ export function renderChat(props: ChatProps) {
       ${
         props.showNewMessages
           ? html`
-            <button
-              class="chat-new-messages"
-              type="button"
-              @click=${props.onScrollToBottom}
-            >
-              New messages ${icons.arrowDown}
-            </button>
+            <div class="chat-new-messages-wrapper">
+              <button
+                class="chat-new-messages"
+                type="button"
+                @click=${props.onScrollToBottom}
+              >
+                New messages ${icons.arrowDown}
+              </button>
+            </div>
           `
           : nothing
       }
