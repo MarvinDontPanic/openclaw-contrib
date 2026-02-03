@@ -4,7 +4,6 @@ import { parseAgentSessionKey } from "../../../src/routing/session-key.js";
 import { refreshChatAvatar } from "./app-chat";
 import {
   renderChatControls,
-  renderModelSwitcher,
   renderRateLimitIndicator,
   renderTab,
   renderThemeToggle,
@@ -126,7 +125,6 @@ export function renderApp(state: AppViewState) {
           </div>
         </div>
         <div class="topbar-status">
-          ${renderModelSwitcher(state)}
           <div class="pill">
             <span class="statusDot ${state.connected ? "ok" : ""}"></span>
             <span>Health</span>
@@ -495,7 +493,6 @@ export function renderApp(state: AppViewState) {
                 toolMessages: state.chatToolMessages,
                 stream: state.chatStream,
                 streamStartedAt: state.chatStreamStartedAt,
-                streamSegments: state.chatStreamSegments,
                 draft: state.chatMessage,
                 queue: state.chatQueue,
                 connected: state.connected,

@@ -11,9 +11,18 @@ import {
 } from "../config/sessions/paths.js";
 import { estimateUsageCost, resolveModelCostConfig } from "../utils/usage-format.js";
 
+type CostBreakdown = {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+};
+
 type ParsedUsageEntry = {
   usage: NormalizedUsage;
   costTotal?: number;
+  costBreakdown?: CostBreakdown;
   provider?: string;
   model?: string;
   timestamp?: Date;
@@ -26,6 +35,13 @@ export type CostUsageTotals = {
   cacheWrite: number;
   totalTokens: number;
   totalCost: number;
+  inputCost: number;
+  outputCost: number;
+  cacheReadCost: number;
+  cacheWriteCost: number;
+  unattributedCost: number;
+  realCost: number;
+  phantomCost: number;
   missingCostEntries: number;
 };
 
@@ -38,6 +54,13 @@ export type CostUsageSummary = {
   days: number;
   daily: CostUsageDailyEntry[];
   totals: CostUsageTotals;
+  byProvider: Record<string, CostUsageTotals>;
+  byModel: Record<string, CostUsageTotals>;
+  dailyByProvider: Record<string, Record<string, number>>; // date -> provider -> cost
+  dailyByModel: Record<string, Record<string, number>>; // date -> model -> cost
+  dailyReal: Record<string, number>; // date -> real cost
+  dailyPhantom: Record<string, number>; // date -> phantom cost
+  providerModes: Record<string, "real" | "phantom">; // provider -> billing mode
 };
 
 export type SessionCostSummary = CostUsageTotals & {
@@ -53,6 +76,13 @@ const emptyTotals = (): CostUsageTotals => ({
   cacheWrite: 0,
   totalTokens: 0,
   totalCost: 0,
+  inputCost: 0,
+  outputCost: 0,
+  cacheReadCost: 0,
+  cacheWriteCost: 0,
+  unattributedCost: 0,
+  realCost: 0,
+  phantomCost: 0,
   missingCostEntries: 0,
 });
 
@@ -80,6 +110,32 @@ const extractCostTotal = (usageRaw?: UsageLike | null): number | undefined => {
     return undefined;
   }
   return total;
+};
+
+const extractCostBreakdown = (usageRaw?: UsageLike | null): CostBreakdown | undefined => {
+  if (!usageRaw || typeof usageRaw !== "object") {
+    return undefined;
+  }
+  const record = usageRaw as Record<string, unknown>;
+  const cost = record.cost as Record<string, unknown> | undefined;
+  if (!cost) {
+    return undefined;
+  }
+  const input = toFiniteNumber(cost.input);
+  const output = toFiniteNumber(cost.output);
+  const cacheRead = toFiniteNumber(cost.cacheRead);
+  const cacheWrite = toFiniteNumber(cost.cacheWrite);
+  const total = toFiniteNumber(cost.total);
+  if (total === undefined) {
+    return undefined;
+  }
+  return {
+    input: input ?? 0,
+    output: output ?? 0,
+    cacheRead: cacheRead ?? 0,
+    cacheWrite: cacheWrite ?? 0,
+    total,
+  };
 };
 
 const parseTimestamp = (entry: Record<string, unknown>): Date | undefined => {
@@ -125,6 +181,7 @@ const parseUsageEntry = (entry: Record<string, unknown>): ParsedUsageEntry | nul
   return {
     usage,
     costTotal: extractCostTotal(usageRaw),
+    costBreakdown: extractCostBreakdown(usageRaw),
     provider,
     model,
     timestamp: parseTimestamp(entry),
@@ -145,12 +202,35 @@ const applyUsageTotals = (totals: CostUsageTotals, usage: NormalizedUsage) => {
   totals.totalTokens += totalTokens;
 };
 
-const applyCostTotal = (totals: CostUsageTotals, costTotal: number | undefined) => {
+const applyCostTotal = (
+  totals: CostUsageTotals,
+  costTotal: number | undefined,
+  costBreakdown?: CostBreakdown,
+) => {
   if (costTotal === undefined) {
     totals.missingCostEntries += 1;
     return;
   }
   totals.totalCost += costTotal;
+  if (costBreakdown) {
+    totals.inputCost += costBreakdown.input;
+    totals.outputCost += costBreakdown.output;
+    totals.cacheReadCost += costBreakdown.cacheRead;
+    totals.cacheWriteCost += costBreakdown.cacheWrite;
+    // Track any difference as unattributed (rounding, missing breakdown components, etc.)
+    const attributedCost =
+      costBreakdown.input +
+      costBreakdown.output +
+      costBreakdown.cacheRead +
+      costBreakdown.cacheWrite;
+    const diff = costTotal - attributedCost;
+    if (diff > 0.001) {
+      totals.unattributedCost += diff;
+    }
+  } else {
+    // No breakdown available — entire cost is unattributed
+    totals.unattributedCost += costTotal;
+  }
 };
 
 async function scanUsageFile(params: {
@@ -193,22 +273,57 @@ export async function loadCostUsageSummary(params?: {
   days?: number;
   config?: OpenClawConfig;
   agentId?: string;
+  includeDeleted?: boolean;
 }): Promise<CostUsageSummary> {
   const days = Math.max(1, Math.floor(params?.days ?? 30));
+  const includeDeleted = params?.includeDeleted ?? true;
   const now = new Date();
   const since = new Date(now);
   since.setDate(since.getDate() - (days - 1));
   const sinceTime = since.getTime();
 
   const dailyMap = new Map<string, CostUsageTotals>();
+  const providerMap = new Map<string, CostUsageTotals>();
+  const modelMap = new Map<string, CostUsageTotals>();
+  const dailyByProviderMap = new Map<string, Map<string, number>>(); // date -> provider -> cost
+  const dailyByModelMap = new Map<string, Map<string, number>>(); // date -> model -> cost
+  const dailyRealMap = new Map<string, number>(); // date -> real cost
+  const dailyPhantomMap = new Map<string, number>(); // date -> phantom cost
   const totals = emptyTotals();
+
+  // Build provider mode lookup from config
+  const providerModes = new Map<string, "real" | "phantom">();
+  const authProfiles = params?.config?.auth?.profiles ?? {};
+  for (const [, profile] of Object.entries(authProfiles)) {
+    if (profile?.provider && profile?.mode) {
+      // api_key = real cost (billed), oauth/token = phantom (estimated)
+      const mode = profile.mode === "api_key" ? "real" : "phantom";
+      providerModes.set(profile.provider, mode);
+    }
+  }
+
+  const getProviderMode = (provider: string | undefined): "real" | "phantom" => {
+    if (!provider) return "phantom";
+    return providerModes.get(provider) ?? "phantom"; // default to phantom if unknown
+  };
 
   const sessionsDir = resolveSessionTranscriptsDirForAgent(params?.agentId);
   const entries = await fs.promises.readdir(sessionsDir, { withFileTypes: true }).catch(() => []);
+
+  const isValidFile = (name: string): boolean => {
+    if (name.endsWith(".jsonl")) {
+      return true;
+    }
+    if (includeDeleted && name.includes(".jsonl.deleted.")) {
+      return true;
+    }
+    return false;
+  };
+
   const files = (
     await Promise.all(
       entries
-        .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
+        .filter((entry) => entry.isFile() && isValidFile(entry.name))
         .map(async (entry) => {
           const filePath = path.join(sessionsDir, entry.name);
           const stats = await fs.promises.stat(filePath).catch(() => null);
@@ -235,11 +350,63 @@ export async function loadCostUsageSummary(params?: {
         const dayKey = formatDayKey(entry.timestamp ?? now);
         const bucket = dailyMap.get(dayKey) ?? emptyTotals();
         applyUsageTotals(bucket, entry.usage);
-        applyCostTotal(bucket, entry.costTotal);
+        applyCostTotal(bucket, entry.costTotal, entry.costBreakdown);
         dailyMap.set(dayKey, bucket);
 
         applyUsageTotals(totals, entry.usage);
-        applyCostTotal(totals, entry.costTotal);
+        applyCostTotal(totals, entry.costTotal, entry.costBreakdown);
+
+        // Track real vs phantom cost
+        const costAmount = entry.costTotal ?? 0;
+        const billingMode = getProviderMode(entry.provider);
+        if (billingMode === "real") {
+          totals.realCost += costAmount;
+          bucket.realCost += costAmount;
+          dailyRealMap.set(dayKey, (dailyRealMap.get(dayKey) ?? 0) + costAmount);
+        } else {
+          totals.phantomCost += costAmount;
+          bucket.phantomCost += costAmount;
+          dailyPhantomMap.set(dayKey, (dailyPhantomMap.get(dayKey) ?? 0) + costAmount);
+        }
+
+        // Track by provider
+        if (entry.provider) {
+          const providerBucket = providerMap.get(entry.provider) ?? emptyTotals();
+          applyUsageTotals(providerBucket, entry.usage);
+          applyCostTotal(providerBucket, entry.costTotal, entry.costBreakdown);
+          if (billingMode === "real") {
+            providerBucket.realCost += costAmount;
+          } else {
+            providerBucket.phantomCost += costAmount;
+          }
+          providerMap.set(entry.provider, providerBucket);
+
+          // Track daily by provider
+          const dayProviders = dailyByProviderMap.get(dayKey) ?? new Map<string, number>();
+          dayProviders.set(
+            entry.provider,
+            (dayProviders.get(entry.provider) ?? 0) + (entry.costTotal ?? 0),
+          );
+          dailyByProviderMap.set(dayKey, dayProviders);
+        }
+
+        // Track by model
+        if (entry.model) {
+          const modelBucket = modelMap.get(entry.model) ?? emptyTotals();
+          applyUsageTotals(modelBucket, entry.usage);
+          applyCostTotal(modelBucket, entry.costTotal, entry.costBreakdown);
+          if (billingMode === "real") {
+            modelBucket.realCost += costAmount;
+          } else {
+            modelBucket.phantomCost += costAmount;
+          }
+          modelMap.set(entry.model, modelBucket);
+
+          // Track daily by model
+          const dayModels = dailyByModelMap.get(dayKey) ?? new Map<string, number>();
+          dayModels.set(entry.model, (dayModels.get(entry.model) ?? 0) + (entry.costTotal ?? 0));
+          dailyByModelMap.set(dayKey, dayModels);
+        }
       },
     });
   }
@@ -248,11 +415,48 @@ export async function loadCostUsageSummary(params?: {
     .map(([date, bucket]) => Object.assign({ date }, bucket))
     .toSorted((a, b) => a.date.localeCompare(b.date));
 
+  const byProvider: Record<string, CostUsageTotals> = {};
+  for (const [provider, bucket] of providerMap) {
+    byProvider[provider] = bucket;
+  }
+
+  const byModel: Record<string, CostUsageTotals> = {};
+  for (const [model, bucket] of modelMap) {
+    byModel[model] = bucket;
+  }
+
+  // Convert daily maps to plain objects
+  const dailyByProvider: Record<string, Record<string, number>> = {};
+  for (const [date, providers] of dailyByProviderMap) {
+    dailyByProvider[date] = Object.fromEntries(providers);
+  }
+
+  const dailyByModel: Record<string, Record<string, number>> = {};
+  for (const [date, models] of dailyByModelMap) {
+    dailyByModel[date] = Object.fromEntries(models);
+  }
+
+  const dailyReal: Record<string, number> = Object.fromEntries(dailyRealMap);
+  const dailyPhantom: Record<string, number> = Object.fromEntries(dailyPhantomMap);
+
+  // Build provider modes map for frontend
+  const providerModesRecord: Record<string, "real" | "phantom"> = {};
+  for (const [provider, mode] of providerModes) {
+    providerModesRecord[provider] = mode;
+  }
+
   return {
     updatedAt: Date.now(),
     days,
     daily,
     totals,
+    byProvider,
+    byModel,
+    dailyByProvider,
+    dailyByModel,
+    dailyReal,
+    dailyPhantom,
+    providerModes: providerModesRecord,
   };
 }
 
@@ -277,7 +481,7 @@ export async function loadSessionCostSummary(params: {
     config: params.config,
     onEntry: (entry) => {
       applyUsageTotals(totals, entry.usage);
-      applyCostTotal(totals, entry.costTotal);
+      applyCostTotal(totals, entry.costTotal, entry.costBreakdown);
       const ts = entry.timestamp?.getTime();
       if (ts && (!lastActivity || ts > lastActivity)) {
         lastActivity = ts;

@@ -37,7 +37,6 @@ export type ChatProps = {
   toolMessages: unknown[];
   stream: string | null;
   streamStartedAt: number | null;
-  streamSegments?: Array<{ text: string; ts: number }>;
   assistantAvatarUrl?: string | null;
   draft: string;
   queue: ChatQueueItem[];
@@ -460,14 +459,7 @@ function groupMessages(items: ChatItem[]): Array<ChatItem | MessageGroup> {
     const role = normalizeRoleForGrouping(normalized.role);
     const timestamp = normalized.timestamp || Date.now();
 
-    // Don't group tool messages with regular assistant text
-    const isToolMessage = Boolean(normalized.toolCallId);
-    const currentGroupHasTools = currentGroup?.messages.some((m) =>
-      Boolean((m.message as { toolCallId?: string })?.toolCallId),
-    );
-    const shouldBreakGroup = isToolMessage !== currentGroupHasTools;
-
-    if (!currentGroup || currentGroup.role !== role || shouldBreakGroup) {
+    if (!currentGroup || currentGroup.role !== role) {
       if (currentGroup) {
         result.push(currentGroup);
       }
@@ -521,48 +513,15 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
       message: msg,
     });
   }
-  // Combine stream segments and tool messages, sorted by timestamp for proper interleaving
-  const segments = props.streamSegments ?? [];
-  const showTools = props.toolDisplayMode !== "off";
-
-  // Build combined list with timestamps for sorting
-  type TimestampedItem = { ts: number; item: ChatItem };
-  const combined: TimestampedItem[] = [];
-
-  // Add stream segments as "stream" items (not "message") to avoid grouping
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i];
-    combined.push({
-      ts: seg.ts,
-      item: {
-        kind: "stream",
-        key: `stream-segment:${i}:${seg.ts}`,
-        text: seg.text,
-        startedAt: seg.ts,
-      },
-    });
-  }
-
-  // Add tool messages
-  if (showTools) {
+  // Show live tool messages unless mode is "off"
+  if (props.toolDisplayMode !== "off") {
     for (let i = 0; i < tools.length; i++) {
-      const tool = tools[i] as { startedAt?: number; timestamp?: number };
-      const ts = tool.startedAt ?? tool.timestamp ?? Date.now();
-      combined.push({
-        ts,
-        item: {
-          kind: "message",
-          key: messageKey(tools[i], i + history.length),
-          message: tools[i],
-        },
+      items.push({
+        kind: "message",
+        key: messageKey(tools[i], i + history.length),
+        message: tools[i],
       });
     }
-  }
-
-  // Sort by timestamp and add to items
-  combined.sort((a, b) => a.ts - b.ts);
-  for (const { item } of combined) {
-    items.push(item);
   }
 
   if (props.stream !== null) {

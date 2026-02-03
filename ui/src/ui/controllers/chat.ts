@@ -10,6 +10,7 @@ export type ChatState = {
   chatLoading: boolean;
   chatMessages: unknown[];
   chatThinkingLevel: string | null;
+  chatContextUsage: { totalTokens: number; contextWindow: number } | null;
   chatSending: boolean;
   chatMessage: string;
   chatAttachments: ChatAttachment[];
@@ -44,6 +45,7 @@ export async function loadChatHistory(state: ChatState) {
     );
     state.chatMessages = Array.isArray(res.messages) ? res.messages : [];
     state.chatThinkingLevel = res.thinkingLevel ?? null;
+    state.chatContextUsage = res.contextUsage ?? null;
   } catch (err) {
     state.lastError = String(err);
   } finally {

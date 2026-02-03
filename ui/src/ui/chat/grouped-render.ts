@@ -1,16 +1,17 @@
 import { html, nothing } from "lit";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
-import type { AssistantIdentity } from "../assistant-identity.ts";
-import type { MessageGroup } from "../types/chat-types.ts";
-import { toSanitizedMarkdownHtml } from "../markdown.ts";
-import { renderCopyAsMarkdownButton } from "./copy-as-markdown.ts";
+import type { AssistantIdentity } from "../assistant-identity";
+import type { ToolDisplayMode } from "../storage";
+import type { MessageGroup } from "../types/chat-types";
+import { toSanitizedMarkdownHtml } from "../markdown";
+import { renderCopyAsMarkdownButton } from "./copy-as-markdown";
 import {
   extractTextCached,
   extractThinkingCached,
   formatReasoningMarkdown,
-} from "./message-extract.ts";
-import { isToolResultMessage, normalizeRoleForGrouping } from "./message-normalizer.ts";
-import { extractToolCards, renderToolCardSidebar } from "./tool-cards.ts";
+} from "./message-extract";
+import { isToolResultMessage, normalizeRoleForGrouping } from "./message-normalizer";
+import { extractToolCards, renderToolCard } from "./tool-cards";
 
 type ImageBlock = {
   url: string;
@@ -110,6 +111,9 @@ export function renderMessageGroup(
     showReasoning: boolean;
     assistantName?: string;
     assistantAvatar?: string | null;
+    toolDisplayMode: ToolDisplayMode;
+    expandedTools: Set<string>;
+    onToggleTool: (toolId: string) => void;
   },
 ) {
   const normalizedRole = normalizeRoleForGrouping(group.role);
@@ -127,19 +131,91 @@ export function renderMessageGroup(
     minute: "2-digit",
   });
 
+  // For tool groups in collapsed mode, render as a compact one-liner
+  const isToolGroup = normalizedRole === "tool";
+  const groupKey = group.messages[0]?.key ?? `group:${group.timestamp}`;
+  const isGroupExpanded = opts.expandedTools.has(groupKey);
+
+  // In collapsed mode, tool groups show as one-liner unless explicitly expanded
+  // In full mode, tool groups show expanded unless explicitly collapsed
+  const shouldCollapseToolGroup =
+    isToolGroup &&
+    ((opts.toolDisplayMode === "collapsed" && !isGroupExpanded) ||
+      (opts.toolDisplayMode === "full" && isGroupExpanded));
+
+  if (isToolGroup && shouldCollapseToolGroup) {
+    const toolCount = group.messages.length;
+    return html`
+      <div 
+        class="chat-group tool chat-group--collapsed"
+        @click=${() => opts.onToggleTool(groupKey)}
+        role="button"
+        tabindex="0"
+        @keydown=${(e: KeyboardEvent) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            opts.onToggleTool(groupKey);
+          }
+        }}
+      >
+        ${renderAvatar(group.role, {
+          name: assistantName,
+          avatar: opts.assistantAvatar ?? null,
+        })}
+        <div class="chat-group-messages chat-group-messages--collapsed">
+          <div class="chat-tool-summary">
+            <span class="chat-tool-summary__count">${toolCount} tool ${toolCount === 1 ? "call" : "calls"}</span>
+            <span class="chat-tool-summary__hint">click to ${opts.toolDisplayMode === "collapsed" ? "expand" : "collapse"}</span>
+          </div>
+          <div class="chat-group-footer">
+            <span class="chat-sender-name">${who}</span>
+            <span class="chat-group-timestamp">${timestamp}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // For tool groups that should show expanded, add click to collapse
+  const toolGroupClickHandler = isToolGroup ? () => opts.onToggleTool(groupKey) : undefined;
+
   return html`
-    <div class="chat-group ${roleClass}">
+    <div class="chat-group ${roleClass} ${isToolGroup && !shouldCollapseToolGroup ? "chat-group--expandable" : ""}">
       ${renderAvatar(group.role, {
         name: assistantName,
         avatar: opts.assistantAvatar ?? null,
       })}
       <div class="chat-group-messages">
+        ${
+          isToolGroup
+            ? html`
+          <div 
+            class="chat-tool-header"
+            @click=${toolGroupClickHandler}
+            role="button"
+            tabindex="0"
+            @keydown=${(e: KeyboardEvent) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                toolGroupClickHandler?.();
+              }
+            }}
+          >
+            <span class="chat-tool-header__hint">click to ${opts.toolDisplayMode === "collapsed" ? "expand" : "collapse"}</span>
+          </div>
+        `
+            : nothing
+        }
         ${group.messages.map((item, index) =>
           renderGroupedMessage(
             item.message,
+            item.key,
             {
               isStreaming: group.isStreaming && index === group.messages.length - 1,
               showReasoning: opts.showReasoning,
+              toolDisplayMode: opts.toolDisplayMode,
+              expandedTools: opts.expandedTools,
+              onToggleTool: opts.onToggleTool,
             },
             opts.onOpenSidebar,
           ),
@@ -217,7 +293,14 @@ function renderMessageImages(images: ImageBlock[]) {
 
 function renderGroupedMessage(
   message: unknown,
-  opts: { isStreaming: boolean; showReasoning: boolean },
+  messageKey: string,
+  opts: {
+    isStreaming: boolean;
+    showReasoning: boolean;
+    toolDisplayMode: ToolDisplayMode;
+    expandedTools: Set<string>;
+    onToggleTool: (toolId: string) => void;
+  },
   onOpenSidebar?: (content: string) => void,
 ) {
   const m = message as Record<string, unknown>;
@@ -229,7 +312,8 @@ function renderGroupedMessage(
     typeof m.toolCallId === "string" ||
     typeof m.tool_call_id === "string";
 
-  const toolCards = extractToolCards(message);
+  // In "off" mode, don't extract/show tool cards at all
+  const toolCards = opts.toolDisplayMode === "off" ? [] : extractToolCards(message);
   const hasToolCards = toolCards.length > 0;
   const images = extractImages(message);
   const hasImages = images.length > 0;
@@ -251,8 +335,26 @@ function renderGroupedMessage(
     .filter(Boolean)
     .join(" ");
 
+  // Determine if this tool card should be expanded based on mode + overrides
+  const getToolExpanded = (toolId: string): boolean => {
+    const hasOverride = opts.expandedTools.has(toolId);
+    if (hasOverride) {
+      // If user clicked, invert the default
+      return opts.toolDisplayMode === "collapsed";
+    }
+    // Default based on mode
+    return opts.toolDisplayMode === "full";
+  };
+
   if (!markdown && hasToolCards && isToolResult) {
-    return html`${toolCards.map((card) => renderToolCardSidebar(card, onOpenSidebar))}`;
+    return html`${toolCards.map((card, idx) => {
+      const toolId = `${messageKey}:tool:${idx}`;
+      return renderToolCard(card, {
+        expanded: getToolExpanded(toolId),
+        onToggle: () => opts.onToggleTool(toolId),
+        onOpenSidebar,
+      });
+    })}`;
   }
 
   if (!markdown && !hasToolCards && !hasImages) {
@@ -275,7 +377,14 @@ function renderGroupedMessage(
           ? html`<div class="chat-text">${unsafeHTML(toSanitizedMarkdownHtml(markdown))}</div>`
           : nothing
       }
-      ${toolCards.map((card) => renderToolCardSidebar(card, onOpenSidebar))}
+      ${toolCards.map((card, idx) => {
+        const toolId = `${messageKey}:tool:${idx}`;
+        return renderToolCard(card, {
+          expanded: getToolExpanded(toolId),
+          onToggle: () => opts.onToggleTool(toolId),
+          onOpenSidebar,
+        });
+      })}
     </div>
   `;
 }

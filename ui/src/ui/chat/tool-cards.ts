@@ -49,60 +49,95 @@ export function extractToolCards(message: unknown): ToolCard[] {
 }
 
 export function renderToolCardSidebar(card: ToolCard, onOpenSidebar?: (content: string) => void) {
+  // Legacy function - delegates to new renderToolCard with expanded=true
+  return renderToolCard(card, { expanded: true, onOpenSidebar });
+}
+
+export type ToolCardRenderOpts = {
+  expanded: boolean;
+  onToggle?: () => void;
+  onOpenSidebar?: (content: string) => void;
+};
+
+export function renderToolCard(card: ToolCard, opts: ToolCardRenderOpts) {
   const display = resolveToolDisplay({ name: card.name, args: card.args });
   const detail = formatToolDetail(display);
   const hasText = Boolean(card.text?.trim());
 
-  const canClick = Boolean(onOpenSidebar);
-  const handleClick = canClick
-    ? () => {
+  const canOpenSidebar = Boolean(opts.onOpenSidebar);
+  const handleSidebarClick = canOpenSidebar
+    ? (e: Event) => {
+        e.stopPropagation();
         if (hasText) {
-          onOpenSidebar!(formatToolOutputForSidebar(card.text!));
+          opts.onOpenSidebar!(formatToolOutputForSidebar(card.text!));
           return;
         }
         const info = `## ${display.label}\n\n${
           detail ? `**Command:** \`${detail}\`\n\n` : ""
         }*No output — tool completed successfully.*`;
-        onOpenSidebar!(info);
+        opts.onOpenSidebar!(info);
       }
     : undefined;
 
   const isShort = hasText && (card.text?.length ?? 0) <= TOOL_INLINE_THRESHOLD;
-  const showCollapsed = hasText && !isShort;
-  const showInline = hasText && isShort;
   const isEmpty = !hasText;
+  const isExpandable = hasText && !isShort;
+
+  // Collapse indicator icon
+  const chevronIcon = html`
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 0.15s ease; transform: rotate(${opts.expanded ? "90" : "0"}deg);">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  `;
+
+  const handleHeaderClick =
+    isExpandable && opts.onToggle
+      ? (e: Event) => {
+          e.stopPropagation();
+          opts.onToggle!();
+        }
+      : undefined;
 
   return html`
     <div
-      class="chat-tool-card ${canClick ? "chat-tool-card--clickable" : ""}"
-      @click=${handleClick}
-      role=${canClick ? "button" : nothing}
-      tabindex=${canClick ? "0" : nothing}
-      @keydown=${
-        canClick
-          ? (e: KeyboardEvent) => {
-              if (e.key !== "Enter" && e.key !== " ") {
-                return;
-              }
-              e.preventDefault();
-              handleClick?.();
-            }
-          : nothing
-      }
+      class="chat-tool-card ${isExpandable ? "chat-tool-card--expandable" : ""} ${opts.expanded ? "chat-tool-card--expanded" : ""}"
     >
-      <div class="chat-tool-card__header">
+      <div
+        class="chat-tool-card__header ${isExpandable ? "chat-tool-card__header--clickable" : ""}"
+        @click=${handleHeaderClick}
+        role=${isExpandable ? "button" : nothing}
+        tabindex=${isExpandable ? "0" : nothing}
+        @keydown=${
+          isExpandable
+            ? (e: KeyboardEvent) => {
+                if (e.key !== "Enter" && e.key !== " ") {
+                  return;
+                }
+                e.preventDefault();
+                opts.onToggle?.();
+              }
+            : nothing
+        }
+      >
         <div class="chat-tool-card__title">
+          ${isExpandable ? html`<span class="chat-tool-card__chevron">${chevronIcon}</span>` : nothing}
           <span class="chat-tool-card__icon">${icons[display.icon]}</span>
           <span>${display.label}</span>
         </div>
-        ${
-          canClick
-            ? html`<span class="chat-tool-card__action">${hasText ? "View" : ""} ${icons.check}</span>`
-            : nothing
-        }
-        ${isEmpty && !canClick ? html`<span class="chat-tool-card__status">${icons.check}</span>` : nothing}
+        <div class="chat-tool-card__actions">
+          ${
+            canOpenSidebar
+              ? html`<button
+                  class="chat-tool-card__sidebar-btn"
+                  @click=${handleSidebarClick}
+                  title="Open in sidebar"
+                >${icons.link}</button>`
+              : nothing
+          }
+          ${isEmpty ? html`<span class="chat-tool-card__status">${icons.check}</span>` : nothing}
+        </div>
       </div>
-      ${detail ? html`<div class="chat-tool-card__detail">${detail}</div>` : nothing}
+      ${detail && opts.expanded ? html`<div class="chat-tool-card__detail">${detail}</div>` : nothing}
       ${
         isEmpty
           ? html`
@@ -111,11 +146,16 @@ export function renderToolCardSidebar(card: ToolCard, onOpenSidebar?: (content: 
           : nothing
       }
       ${
-        showCollapsed
+        isExpandable && opts.expanded
+          ? html`<div class="chat-tool-card__content mono">${card.text}</div>`
+          : nothing
+      }
+      ${
+        isExpandable && !opts.expanded
           ? html`<div class="chat-tool-card__preview mono">${getTruncatedPreview(card.text!)}</div>`
           : nothing
       }
-      ${showInline ? html`<div class="chat-tool-card__inline mono">${card.text}</div>` : nothing}
+      ${isShort ? html`<div class="chat-tool-card__inline mono">${card.text}</div>` : nothing}
     </div>
   `;
 }

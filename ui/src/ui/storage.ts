@@ -2,6 +2,8 @@ const KEY = "openclaw.control.settings.v1";
 
 import type { ThemeMode } from "./theme.ts";
 
+export type ToolDisplayMode = "off" | "collapsed" | "full";
+
 export type UiSettings = {
   gatewayUrl: string;
   token: string;
@@ -9,7 +11,7 @@ export type UiSettings = {
   lastActiveSessionKey: string;
   theme: ThemeMode;
   chatFocusMode: boolean;
-  chatShowThinking: boolean;
+  toolDisplayMode: ToolDisplayMode;
   splitRatio: number; // Sidebar split ratio (0.4 to 0.7, default 0.6)
   navCollapsed: boolean; // Collapsible sidebar state
   navGroupsCollapsed: Record<string, boolean>; // Which nav groups are collapsed
@@ -28,7 +30,7 @@ export function loadSettings(): UiSettings {
     lastActiveSessionKey: "main",
     theme: "system",
     chatFocusMode: false,
-    chatShowThinking: true,
+    toolDisplayMode: "full",
     splitRatio: 0.6,
     navCollapsed: false,
     navGroupsCollapsed: {},
@@ -61,10 +63,17 @@ export function loadSettings(): UiSettings {
           : defaults.theme,
       chatFocusMode:
         typeof parsed.chatFocusMode === "boolean" ? parsed.chatFocusMode : defaults.chatFocusMode,
-      chatShowThinking:
-        typeof parsed.chatShowThinking === "boolean"
-          ? parsed.chatShowThinking
-          : defaults.chatShowThinking,
+      toolDisplayMode:
+        parsed.toolDisplayMode === "off" ||
+        parsed.toolDisplayMode === "collapsed" ||
+        parsed.toolDisplayMode === "full"
+          ? parsed.toolDisplayMode
+          : // Migrate old boolean setting
+            typeof (parsed as Record<string, unknown>).chatShowThinking === "boolean"
+            ? (parsed as Record<string, unknown>).chatShowThinking
+              ? "full"
+              : "off"
+            : defaults.toolDisplayMode,
       splitRatio:
         typeof parsed.splitRatio === "number" &&
         parsed.splitRatio >= 0.4 &&

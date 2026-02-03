@@ -269,19 +269,45 @@
 .chat-compose__actions {
   flex-shrink: 0;
   display: flex;
+  flex-direction: column;
   align-items: stretch;
-  gap: 8px;
+  gap: 6px;
 }
 
 .chat-compose .chat-compose__actions .btn {
   padding: 0 16px;
   font-size: 13px;
-  height: 40px;
-  min-height: 40px;
-  max-height: 40px;
+  min-height: 36px;
   line-height: 1;
   white-space: nowrap;
   box-sizing: border-box;
+}
+
+/* Send button - more prominent */
+.chat-compose__send {
+  font-size: 14px !important;
+  min-height: 42px !important;
+  padding: 0 24px !important;
+}
+
+/* New session button with context subtitle */
+.chat-compose__new-session {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 16px !important;
+}
+
+.chat-compose__new-session-label {
+  font-size: 13px;
+}
+
+.chat-compose__context-subtitle {
+  font-size: 10px;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Chat controls - moved to content-header area, left aligned */

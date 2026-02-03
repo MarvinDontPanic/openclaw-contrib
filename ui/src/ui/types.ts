@@ -17,6 +17,60 @@ export type ChannelUiMetaEntry = {
   systemImage?: string;
 };
 
+export type CostUsageTotals = {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  totalTokens: number;
+  totalCost: number;
+  inputCost: number;
+  outputCost: number;
+  cacheReadCost: number;
+  cacheWriteCost: number;
+  unattributedCost: number;
+  realCost: number;
+  phantomCost: number;
+  missingCostEntries: number;
+};
+
+export type CostUsageDailyEntry = CostUsageTotals & {
+  date: string;
+};
+
+export type CostUsageSummary = {
+  updatedAt: number;
+  days: number;
+  daily: CostUsageDailyEntry[];
+  totals: CostUsageTotals;
+  byProvider: Record<string, CostUsageTotals>;
+  byModel: Record<string, CostUsageTotals>;
+  dailyByProvider?: Record<string, Record<string, number>>;
+  dailyByModel?: Record<string, Record<string, number>>;
+  dailyReal?: Record<string, number>;
+  dailyPhantom?: Record<string, number>;
+  providerModes?: Record<string, "real" | "phantom">;
+};
+
+export type RateLimitWindow = {
+  label: string;
+  usedPercent: number;
+  resetAt?: number;
+};
+
+export type ProviderRateLimitSnapshot = {
+  provider: string;
+  displayName: string;
+  windows: RateLimitWindow[];
+  plan?: string;
+  error?: string;
+};
+
+export type RateLimitStatus = {
+  updatedAt: number;
+  providers: ProviderRateLimitSnapshot[];
+};
+
 export const CRON_CHANNEL_LAST = "last";
 
 export type ChannelAccountSnapshot = {

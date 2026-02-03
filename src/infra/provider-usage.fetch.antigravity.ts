@@ -131,9 +131,15 @@ function extractModelQuotas(data: FetchAvailableModelsResponse): Map<string, Mod
       continue;
     }
 
-    const remainingFraction = parseNumber(quotaInfo.remainingFraction);
+    // If model is explicitly exhausted, treat as 0% remaining (100% used)
+    // even if remainingFraction is not provided
+    let remainingFraction = parseNumber(quotaInfo.remainingFraction);
     if (remainingFraction === undefined) {
-      continue;
+      if (quotaInfo.isExhausted === true) {
+        remainingFraction = 0;
+      } else {
+        continue;
+      }
     }
 
     const resetTime = parseEpochMs(quotaInfo.resetTime);

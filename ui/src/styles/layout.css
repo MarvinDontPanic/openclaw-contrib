@@ -179,6 +179,86 @@
   height: 6px;
 }
 
+/* Rate limit indicator (inside pill) */
+.status-divider {
+  color: var(--text-tertiary, #666);
+  margin: 0 2px;
+}
+
+.rate-limit-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: default;
+  position: relative;
+}
+
+.rate-limit-model {
+  color: var(--text-secondary, #aaa);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rate-limit-stat {
+  color: var(--text-primary, #fff);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom tooltip for rate limit */
+.rate-limit-tooltip {
+  display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: var(--bg-elevated, #1a1a1a);
+  border: 1px solid var(--border-subtle, #333);
+  border-radius: 8px;
+  padding: 10px 12px;
+  min-width: 300px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.rate-limit-info:hover .rate-limit-tooltip {
+  display: block;
+}
+
+.rate-limit-tooltip-model {
+  color: var(--text-secondary, #aaa);
+  font-size: 11px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-subtle, #333);
+  white-space: normal;
+  word-break: break-all;
+}
+
+.rate-limit-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+.rate-limit-tooltip-name {
+  color: var(--text-primary, #fff);
+  font-weight: 500;
+}
+
+.rate-limit-tooltip-pct {
+  color: var(--accent, #4a9eff);
+  font-variant-numeric: tabular-nums;
+}
+
+.rate-limit-tooltip-reset {
+  color: var(--text-tertiary, #666);
+  font-size: 11px;
+}
+
 .topbar-status .theme-toggle {
   --theme-item: 24px;
   --theme-gap: 2px;

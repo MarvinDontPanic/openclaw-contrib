@@ -23,6 +23,7 @@ import type {
   LogLevel,
   PresenceEntry,
   ChannelsStatusSnapshot,
+  RateLimitStatus,
   SessionsListResult,
   SkillStatusReport,
   StatusSummary,
@@ -135,7 +136,9 @@ export class OpenClawApp extends LitElement {
   @state() compactionStatus: import("./app-tool-stream.ts").CompactionStatus | null = null;
   @state() chatAvatarUrl: string | null = null;
   @state() chatThinkingLevel: string | null = null;
+  @state() chatContextUsage: { totalTokens: number; contextWindow: number } | null = null;
   @state() chatQueue: ChatQueueItem[] = [];
+  @state() chatExpandedTools: Set<string> = new Set();
   @state() chatAttachments: ChatAttachment[] = [];
   // Sidebar state for tool output viewing
   @state() sidebarOpen = false;
@@ -227,6 +230,14 @@ export class OpenClawApp extends LitElement {
   @state() sessionsFilterLimit = "120";
   @state() sessionsIncludeGlobal = true;
   @state() sessionsIncludeUnknown = false;
+
+  @state() usageLoading = false;
+  @state() usageSummary: import("./types").CostUsageSummary | null = null;
+  @state() usageError: string | null = null;
+  @state() usageDaysFilter = 30;
+  @state() usageDisplayMode: "cost" | "tokens" = "cost";
+  @state() usageGroupBy: "none" | "provider" | "model" | "type" = "none";
+  @state() rateLimitStatus: RateLimitStatus | null = null;
 
   @state() cronLoading = false;
   @state() cronJobs: CronJob[] = [];

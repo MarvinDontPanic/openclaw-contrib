@@ -1,15 +1,15 @@
 import { html } from "lit";
 import { repeat } from "lit/directives/repeat.js";
-import type { AppViewState } from "./app-view-state.ts";
-import type { ThemeTransitionContext } from "./theme-transition.ts";
-import type { ThemeMode } from "./theme.ts";
-import type { SessionsListResult } from "./types.ts";
-import { refreshChat } from "./app-chat.ts";
-import { syncUrlWithSessionKey } from "./app-settings.ts";
-import { OpenClawApp } from "./app.ts";
-import { ChatState, loadChatHistory } from "./controllers/chat.ts";
-import { icons } from "./icons.ts";
-import { iconForTab, pathForTab, titleForTab, type Tab } from "./navigation.ts";
+import type { AppViewState } from "./app-view-state";
+import type { ToolDisplayMode } from "./storage";
+import type { ThemeMode } from "./theme";
+import type { ThemeTransitionContext } from "./theme-transition";
+import type { SessionsListResult } from "./types";
+import { refreshChat } from "./app-chat";
+import { syncUrlWithSessionKey } from "./app-settings";
+import { loadChatHistory } from "./controllers/chat";
+import { icons } from "./icons";
+import { iconForTab, pathForTab, titleForTab, type Tab } from "./navigation";
 
 export function renderTab(state: AppViewState, tab: Tab) {
   const href = pathForTab(tab, state.basePath);
@@ -48,7 +48,9 @@ export function renderChatControls(state: AppViewState) {
   );
   const disableThinkingToggle = state.onboarding;
   const disableFocusToggle = state.onboarding;
-  const showThinking = state.onboarding ? false : state.settings.chatShowThinking;
+  const toolDisplayMode: ToolDisplayMode = state.onboarding
+    ? "off"
+    : state.settings.toolDisplayMode;
   const focusActive = state.onboarding ? true : state.settings.chatFocusMode;
   // Refresh icon
   const refreshIcon = html`
@@ -95,18 +97,18 @@ export function renderChatControls(state: AppViewState) {
             state.sessionKey = next;
             state.chatMessage = "";
             state.chatStream = null;
-            (state as unknown as OpenClawApp).chatStreamStartedAt = null;
+            state.chatStreamStartedAt = null;
             state.chatRunId = null;
-            (state as unknown as OpenClawApp).resetToolStream();
-            (state as unknown as OpenClawApp).resetChatScroll();
+            state.resetToolStream();
+            state.resetChatScroll();
             state.applySettings({
               ...state.settings,
               sessionKey: next,
               lastActiveSessionKey: next,
             });
             void state.loadAssistantIdentity();
-            syncUrlWithSessionKey(next, true);
-            void loadChatHistory(state as unknown as ChatState);
+            syncUrlWithSessionKey(state, next, true);
+            void loadChatHistory(state);
           }}
         >
           ${repeat(
@@ -123,7 +125,7 @@ export function renderChatControls(state: AppViewState) {
         class="btn btn--sm btn--icon"
         ?disabled=${state.chatLoading || !state.connected}
         @click=${() => {
-          (state as unknown as OpenClawApp).resetToolStream();
+          state.resetToolStream();
           void refreshChat(state as unknown as Parameters<typeof refreshChat>[0]);
         }}
         title="Refresh chat data"
@@ -132,22 +134,31 @@ export function renderChatControls(state: AppViewState) {
       </button>
       <span class="chat-controls__separator">|</span>
       <button
-        class="btn btn--sm btn--icon ${showThinking ? "active" : ""}"
+        class="btn btn--sm btn--icon ${toolDisplayMode !== "off" ? "active" : ""} ${toolDisplayMode === "collapsed" ? "partial" : ""}"
         ?disabled=${disableThinkingToggle}
         @click=${() => {
           if (disableThinkingToggle) {
             return;
           }
+          // Cycle: off -> collapsed -> full -> off
+          const nextMode: ToolDisplayMode =
+            toolDisplayMode === "off"
+              ? "collapsed"
+              : toolDisplayMode === "collapsed"
+                ? "full"
+                : "off";
+          // Reset per-tool overrides when changing global mode
+          state.chatExpandedTools = new Set();
           state.applySettings({
             ...state.settings,
-            chatShowThinking: !state.settings.chatShowThinking,
+            toolDisplayMode: nextMode,
           });
         }}
-        aria-pressed=${showThinking}
+        aria-pressed=${toolDisplayMode !== "off"}
         title=${
           disableThinkingToggle
             ? "Disabled during onboarding"
-            : "Toggle assistant thinking/working output"
+            : `Tool display: ${toolDisplayMode} (click to cycle)`
         }
       >
         ${icons.brain}
@@ -229,7 +240,7 @@ function resolveSessionOptions(
     seen.add(mainSessionKey);
     options.push({
       key: mainSessionKey,
-      displayName: resolveSessionDisplayName(mainSessionKey, resolvedMain || undefined),
+      displayName: resolveSessionDisplayName(mainSessionKey, resolvedMain),
     });
   }
 
@@ -259,6 +270,110 @@ function resolveSessionOptions(
 }
 
 const THEME_ORDER: ThemeMode[] = ["system", "light", "dark"];
+
+function formatRateLimitReset(resetAt: number | undefined): string {
+  if (!resetAt) return "";
+  const now = Date.now();
+  const diff = resetAt - now;
+  if (diff <= 0) return "now";
+  const mins = Math.floor(diff / 60000);
+  const hours = Math.floor(mins / 60);
+  if (hours > 0) {
+    return `${hours}h ${mins % 60}m`;
+  }
+  return `${mins}m`;
+}
+
+function extractModelName(fullModel: string | undefined): string {
+  if (!fullModel) return "";
+  // Handle "provider/model" format - return just the model part
+  const parts = fullModel.split("/");
+  return parts[parts.length - 1] || fullModel;
+}
+
+export function renderRateLimitIndicator(state: AppViewState) {
+  const status = state.rateLimitStatus;
+
+  // Get model name from config snapshot (nested structure)
+  const config = state.configSnapshot?.config as Record<string, unknown> | undefined;
+  const agents = config?.agents as Record<string, unknown> | undefined;
+  const defaults = agents?.defaults as Record<string, unknown> | undefined;
+  const modelConfig = defaults?.model as Record<string, unknown> | undefined;
+  const defaultModel = modelConfig?.primary as string | undefined;
+  const modelName = extractModelName(defaultModel);
+
+  // Get rate limit info
+  let remainingPercent: number | null = null;
+  let tooltipContent = "";
+
+  if (status?.providers?.length) {
+    // Find a provider with meaningful rate limit data:
+    // - Has windows with resetAt (time-bounded limit) OR usedPercent > 0 (actual usage tracked)
+    // This excludes pay-per-token/unlimited providers that show misleading "100%"
+    const activeProvider = status.providers.find((p) =>
+      p.windows?.some((w) => w.resetAt != null || w.usedPercent > 0),
+    );
+    if (activeProvider) {
+      const window = activeProvider.windows[0];
+      remainingPercent = Math.round(100 - (window?.usedPercent ?? 0));
+
+      // Build tooltip content
+      const tooltipLines = status.providers
+        .filter((p) => p.windows && p.windows.length > 0)
+        .map((p) => {
+          const w = p.windows[0];
+          const pct = Math.round(100 - (w?.usedPercent ?? 0));
+          const reset = formatRateLimitReset(w?.resetAt);
+          return { name: p.displayName, pct, reset };
+        });
+    }
+  }
+
+  // If we have nothing to show, return empty
+  if (!modelName && remainingPercent === null) {
+    return html`
+      
+    `;
+  }
+
+  // Build tooltip rows for custom tooltip
+  const tooltipRows =
+    status?.providers
+      ?.filter((p) => p.windows && p.windows.length > 0)
+      .map((p) => {
+        const w = p.windows[0];
+        const pct = Math.round(100 - (w?.usedPercent ?? 0));
+        const reset = formatRateLimitReset(w?.resetAt);
+        return { name: p.displayName, pct, reset };
+      }) ?? [];
+
+  return html`
+    <span class="status-divider">·</span>
+    <span class="rate-limit-info">
+      ${modelName ? html`<span class="rate-limit-model">${modelName}</span>` : ""}
+      ${
+        modelName && remainingPercent !== null
+          ? html`
+              <span class="status-divider">·</span>
+            `
+          : ""
+      }
+      ${remainingPercent !== null ? html`<span class="rate-limit-stat">⏱ ${remainingPercent}%</span>` : ""}
+      <div class="rate-limit-tooltip">
+        ${defaultModel ? html`<div class="rate-limit-tooltip-model">${defaultModel}</div>` : ""}
+        ${tooltipRows.map(
+          (row) => html`
+          <div class="rate-limit-tooltip-row">
+            <span class="rate-limit-tooltip-name">${row.name}</span>
+            <span class="rate-limit-tooltip-pct">${row.pct}% left</span>
+            ${row.reset ? html`<span class="rate-limit-tooltip-reset">(resets ${row.reset})</span>` : ""}
+          </div>
+        `,
+        )}
+      </div>
+    </span>
+  `;
+}
 
 export function renderThemeToggle(state: AppViewState) {
   const index = Math.max(0, THEME_ORDER.indexOf(state.theme));

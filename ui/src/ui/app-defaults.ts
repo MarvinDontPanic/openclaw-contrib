@@ -10,6 +10,9 @@ export const DEFAULT_LOG_LEVEL_FILTERS: Record<LogLevel, boolean> = {
   fatal: true,
 };
 
+export const DEFAULT_USAGE_DAYS_FILTER = 30;
+export const DEFAULT_USAGE_DISPLAY_MODE: "cost" | "tokens" = "cost";
+
 export const DEFAULT_CRON_FORM: CronFormState = {
   name: "",
   description: "",

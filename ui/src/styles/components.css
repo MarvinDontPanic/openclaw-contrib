@@ -397,6 +397,12 @@
   color: var(--accent);
 }
 
+.btn.partial {
+  border-color: var(--warning, #f59e0b);
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--warning, #f59e0b);
+}
+
 .btn.danger {
   border-color: transparent;
   background: var(--danger-subtle);

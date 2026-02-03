@@ -5,6 +5,7 @@ import path from "node:path";
 import type { MsgContext } from "../../auto-reply/templating.js";
 import type { GatewayRequestContext, GatewayRequestHandlers } from "./types.js";
 import { resolveSessionAgentId } from "../../agents/agent-scope.js";
+import { lookupContextTokens } from "../../agents/context.js";
 import { resolveEffectiveMessagesConfig, resolveIdentityName } from "../../agents/identity.js";
 import { resolveThinkingDefault } from "../../agents/model-selection.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
@@ -230,11 +231,21 @@ export const chatHandlers: GatewayRequestHandlers = {
         });
       }
     }
+
+    // Get context usage info
+    const { provider, model } = resolveSessionModelRef(cfg, entry);
+    const contextWindow = entry?.contextTokens ?? lookupContextTokens(model) ?? 200000;
+    const totalTokens = entry?.totalTokens ?? 0;
+
     respond(true, {
       sessionKey,
       sessionId,
       messages: capped,
       thinkingLevel,
+      contextUsage: {
+        totalTokens,
+        contextWindow,
+      },
     });
   },
   "chat.abort": ({ params, respond, context }) => {
