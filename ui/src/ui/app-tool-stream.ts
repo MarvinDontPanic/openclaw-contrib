@@ -32,6 +32,8 @@ type ToolStreamHost = {
   toolStreamOrder: string[];
   chatToolMessages: Record<string, unknown>[];
   toolStreamSyncTimer: number | null;
+  // Committed text segments (text that was streaming before a tool started)
+  chatStreamSegments: Array<{ text: string; ts: number }>;
 };
 
 function extractToolOutputText(value: unknown): string | null {
@@ -158,6 +160,7 @@ export function resetToolStream(host: ToolStreamHost) {
   host.toolStreamById.clear();
   host.toolStreamOrder = [];
   host.chatToolMessages = [];
+  host.chatStreamSegments = [];
   flushToolStreamSync(host);
 }
 
@@ -228,11 +231,17 @@ export function handleAgentEvent(host: ToolStreamHost, payload?: AgentEventPaylo
         requestUpdate?: () => void;
       };
 
+      // Use clientRunId if provided (backend sends this when internal runId differs).
+      const assistantRunId =
+        typeof (payload as { clientRunId?: string }).clientRunId === "string"
+          ? (payload as { clientRunId?: string }).clientRunId
+          : payload.runId;
+
       if (!appHost.chatRunId) {
-        appHost.chatRunId = payload.runId;
+        appHost.chatRunId = assistantRunId;
       }
 
-      if (payload.runId === appHost.chatRunId) {
+      if (assistantRunId === appHost.chatRunId) {
         appHost.chatStream = text;
         if (!appHost.chatStreamStartedAt) {
           appHost.chatStreamStartedAt = payload.ts;
@@ -250,14 +259,21 @@ export function handleAgentEvent(host: ToolStreamHost, payload?: AgentEventPaylo
     return;
   }
   // Fallback: only accept session-less events for the active run.
-  if (!sessionKey && host.chatRunId && payload.runId !== host.chatRunId) {
+  // Use clientRunId if provided (backend sends this when internal runId differs).
+  const payloadRunId =
+    typeof (payload as { clientRunId?: string }).clientRunId === "string"
+      ? (payload as { clientRunId?: string }).clientRunId
+      : payload.runId;
+  if (!sessionKey && host.chatRunId && payloadRunId !== host.chatRunId) {
     return;
   }
-  if (host.chatRunId && payload.runId !== host.chatRunId) {
+  if (host.chatRunId && payloadRunId !== host.chatRunId) {
     return;
   }
+  // Tool events can arrive before assistant stream events.
+  // Initialize chatRunId from the first tool event if not yet set.
   if (!host.chatRunId) {
-    return;
+    host.chatRunId = payloadRunId;
   }
 
   const data = payload.data ?? {};
@@ -278,9 +294,23 @@ export function handleAgentEvent(host: ToolStreamHost, payload?: AgentEventPaylo
   const now = Date.now();
   let entry = host.toolStreamById.get(toolCallId);
   if (!entry) {
+    // When a new tool starts, commit any pending streaming text
+    const appHost = host as unknown as {
+      chatStream: string | null;
+      chatStreamStartedAt: number | null;
+    };
+    if (appHost.chatStream && appHost.chatStream.trim()) {
+      host.chatStreamSegments.push({
+        text: appHost.chatStream,
+        ts: appHost.chatStreamStartedAt ?? now,
+      });
+      appHost.chatStream = null;
+      appHost.chatStreamStartedAt = null;
+    }
+
     entry = {
       toolCallId,
-      runId: payload.runId,
+      runId: payloadRunId,
       sessionKey,
       name,
       args,

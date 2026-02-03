@@ -1,18 +1,19 @@
 import { html, nothing } from "lit";
 import { ref } from "lit/directives/ref.js";
 import { repeat } from "lit/directives/repeat.js";
-import type { SessionsListResult } from "../types.ts";
-import type { ChatItem, MessageGroup } from "../types/chat-types.ts";
-import type { ChatAttachment, ChatQueueItem } from "../ui-types.ts";
+import type { ToolDisplayMode } from "../storage";
+import type { SessionsListResult } from "../types";
+import type { ChatItem, MessageGroup } from "../types/chat-types";
+import type { ChatAttachment, ChatQueueItem } from "../ui-types";
 import {
   renderMessageGroup,
   renderReadingIndicatorGroup,
   renderStreamingGroup,
-} from "../chat/grouped-render.ts";
-import { normalizeMessage, normalizeRoleForGrouping } from "../chat/message-normalizer.ts";
-import { icons } from "../icons.ts";
-import { renderMarkdownSidebar } from "./markdown-sidebar.ts";
-import "../components/resizable-divider.ts";
+} from "../chat/grouped-render";
+import { normalizeMessage, normalizeRoleForGrouping } from "../chat/message-normalizer";
+import { icons } from "../icons";
+import { renderMarkdownSidebar } from "./markdown-sidebar";
+import "../components/resizable-divider";
 
 export type CompactionIndicatorStatus = {
   active: boolean;
@@ -24,15 +25,19 @@ export type ChatProps = {
   sessionKey: string;
   onSessionKeyChange: (next: string) => void;
   thinkingLevel: string | null;
-  showThinking: boolean;
+  toolDisplayMode: ToolDisplayMode;
+  expandedTools: Set<string>;
+  onToggleTool: (toolId: string) => void;
   loading: boolean;
   sending: boolean;
   canAbort?: boolean;
   compactionStatus?: CompactionIndicatorStatus | null;
+  contextUsage?: { totalTokens: number; contextWindow: number } | null;
   messages: unknown[];
   toolMessages: unknown[];
   stream: string | null;
   streamStartedAt: number | null;
+  streamSegments?: Array<{ text: string; ts: number }>;
   assistantAvatarUrl?: string | null;
   draft: string;
   queue: ChatQueueItem[];
@@ -193,7 +198,7 @@ export function renderChat(props: ChatProps) {
   const canAbort = Boolean(props.canAbort && props.onAbort);
   const activeSession = props.sessions?.sessions?.find((row) => row.key === props.sessionKey);
   const reasoningLevel = activeSession?.reasoningLevel ?? "off";
-  const showReasoning = props.showThinking && reasoningLevel !== "off";
+  const showReasoning = props.toolDisplayMode !== "off" && reasoningLevel !== "off";
   const assistantIdentity = {
     name: props.assistantName,
     avatar: props.assistantAvatar ?? props.assistantAvatarUrl ?? null,
@@ -245,6 +250,9 @@ export function renderChat(props: ChatProps) {
               showReasoning,
               assistantName: props.assistantName,
               assistantAvatar: assistantIdentity.avatar,
+              toolDisplayMode: props.toolDisplayMode,
+              expandedTools: props.expandedTools,
+              onToggleTool: props.onToggleTool,
             });
           }
 
@@ -397,14 +405,21 @@ export function renderChat(props: ChatProps) {
           </label>
           <div class="chat-compose__actions">
             <button
-              class="btn"
+              class="btn chat-compose__new-session"
               ?disabled=${!props.connected || (!canAbort && props.sending)}
               @click=${canAbort ? props.onAbort : props.onNewSession}
             >
-              ${canAbort ? "Stop" : "New session"}
+<span class="chat-compose__new-session-label">${canAbort ? "Stop" : "New session"}</span>
+              ${
+                !canAbort && props.contextUsage
+                  ? html`
+                <span class="chat-compose__context-subtitle">📚 ${formatContextSubtitle(props.contextUsage)}</span>
+              `
+                  : nothing
+              }
             </button>
             <button
-              class="btn primary"
+              class="btn primary chat-compose__send"
               ?disabled=${!props.connected}
               @click=${props.onSend}
             >
@@ -415,6 +430,14 @@ export function renderChat(props: ChatProps) {
       </div>
     </section>
   `;
+}
+
+function formatContextSubtitle(usage: { totalTokens: number; contextWindow: number }): string {
+  const { totalTokens, contextWindow } = usage;
+  const percent = contextWindow > 0 ? Math.round((totalTokens / contextWindow) * 100) : 0;
+  const usedK = Math.round(totalTokens / 1000);
+  const totalK = Math.round(contextWindow / 1000);
+  return `${percent}% (${usedK}k/${totalK}k)`;
 }
 
 const CHAT_HISTORY_RENDER_LIMIT = 200;
@@ -437,7 +460,14 @@ function groupMessages(items: ChatItem[]): Array<ChatItem | MessageGroup> {
     const role = normalizeRoleForGrouping(normalized.role);
     const timestamp = normalized.timestamp || Date.now();
 
-    if (!currentGroup || currentGroup.role !== role) {
+    // Don't group tool messages with regular assistant text
+    const isToolMessage = Boolean(normalized.toolCallId);
+    const currentGroupHasTools = currentGroup?.messages.some((m) =>
+      Boolean((m.message as { toolCallId?: string })?.toolCallId),
+    );
+    const shouldBreakGroup = isToolMessage !== currentGroupHasTools;
+
+    if (!currentGroup || currentGroup.role !== role || shouldBreakGroup) {
       if (currentGroup) {
         result.push(currentGroup);
       }
@@ -480,7 +510,8 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
     const msg = history[i];
     const normalized = normalizeMessage(msg);
 
-    if (!props.showThinking && normalized.role.toLowerCase() === "toolresult") {
+    // In "off" mode, hide tool results entirely
+    if (props.toolDisplayMode === "off" && normalized.role.toLowerCase() === "toolresult") {
       continue;
     }
 
@@ -490,14 +521,48 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
       message: msg,
     });
   }
-  if (props.showThinking) {
+  // Combine stream segments and tool messages, sorted by timestamp for proper interleaving
+  const segments = props.streamSegments ?? [];
+  const showTools = props.toolDisplayMode !== "off";
+
+  // Build combined list with timestamps for sorting
+  type TimestampedItem = { ts: number; item: ChatItem };
+  const combined: TimestampedItem[] = [];
+
+  // Add stream segments as "stream" items (not "message") to avoid grouping
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    combined.push({
+      ts: seg.ts,
+      item: {
+        kind: "stream",
+        key: `stream-segment:${i}:${seg.ts}`,
+        text: seg.text,
+        startedAt: seg.ts,
+      },
+    });
+  }
+
+  // Add tool messages
+  if (showTools) {
     for (let i = 0; i < tools.length; i++) {
-      items.push({
-        kind: "message",
-        key: messageKey(tools[i], i + history.length),
-        message: tools[i],
+      const tool = tools[i] as { startedAt?: number; timestamp?: number };
+      const ts = tool.startedAt ?? tool.timestamp ?? Date.now();
+      combined.push({
+        ts,
+        item: {
+          kind: "message",
+          key: messageKey(tools[i], i + history.length),
+          message: tools[i],
+        },
       });
     }
+  }
+
+  // Sort by timestamp and add to items
+  combined.sort((a, b) => a.ts - b.ts);
+  for (const { item } of combined) {
+    items.push(item);
   }
 
   if (props.stream !== null) {
