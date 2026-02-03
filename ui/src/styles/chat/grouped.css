@@ -332,31 +332,35 @@ img.chat-avatar {
   opacity: 1;
 }
 
-/* Expandable tool groups - show collapse hint on hover */
+/* Expandable tool groups - entire group is clickable */
 .chat-group--expandable {
-  position: relative;
-}
-
-.chat-tool-header {
-  display: flex;
-  justify-content: flex-end;
   cursor: pointer;
-  padding: 2px 0;
-  margin-bottom: 4px;
+  transition: background 150ms ease-out;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  margin-left: 0;
 }
 
-.chat-tool-header__hint {
-  font-size: 10px;
-  color: var(--muted);
-  opacity: 0;
-  transition: opacity 150ms ease-out;
+.chat-group--expandable:hover {
+  background: var(--bg-hover);
 }
 
-.chat-group--expandable:hover .chat-tool-header__hint {
-  opacity: 0.7;
+/* Inline tool summary (for assistant messages with only tool calls) */
+.chat-tool-summary--inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    background 150ms ease-out,
+    border-color 150ms ease-out;
 }
 
-.chat-tool-header:hover .chat-tool-header__hint {
-  opacity: 1;
-  color: var(--accent);
+.chat-tool-summary--inline:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
 }

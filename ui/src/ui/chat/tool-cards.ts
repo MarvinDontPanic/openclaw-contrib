@@ -55,6 +55,7 @@ export function renderToolCardSidebar(card: ToolCard, onOpenSidebar?: (content: 
 
 export type ToolCardRenderOpts = {
   expanded: boolean;
+  compact?: boolean; // Render as inline one-liner (for collapsed mode in assistant bubbles)
   onToggle?: () => void;
   onOpenSidebar?: (content: string) => void;
 };
@@ -63,6 +64,38 @@ export function renderToolCard(card: ToolCard, opts: ToolCardRenderOpts) {
   const display = resolveToolDisplay({ name: card.name, args: card.args });
   const detail = formatToolDetail(display);
   const hasText = Boolean(card.text?.trim());
+
+  // Compact mode: render as a simple inline one-liner
+  if (opts.compact) {
+    const canOpenSidebar = Boolean(opts.onOpenSidebar);
+    const handleClick = canOpenSidebar
+      ? (e: Event) => {
+          e.stopPropagation();
+          if (hasText) {
+            opts.onOpenSidebar!(formatToolOutputForSidebar(card.text!));
+            return;
+          }
+          const info = `## ${display.label}\n\n${
+            detail ? `**Command:** \`${detail}\`\n\n` : ""
+          }*No output — tool completed successfully.*`;
+          opts.onOpenSidebar!(info);
+        }
+      : undefined;
+
+    return html`
+      <span 
+        class="chat-tool-inline ${canOpenSidebar ? "chat-tool-inline--clickable" : ""}"
+        @click=${handleClick}
+        role=${canOpenSidebar ? "button" : nothing}
+        tabindex=${canOpenSidebar ? "0" : nothing}
+        title=${detail || display.label}
+      >
+        <span class="chat-tool-inline__icon">${icons[display.icon]}</span>
+        <span class="chat-tool-inline__name">${display.label}</span>
+        <span class="chat-tool-inline__status">${icons.check}</span>
+      </span>
+    `;
+  }
 
   const canOpenSidebar = Boolean(opts.onOpenSidebar);
   const handleSidebarClick = canOpenSidebar

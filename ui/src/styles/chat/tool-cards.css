@@ -13,9 +13,10 @@
   overflow: hidden;
 }
 
-/* Collapsed state - compact */
+/* Collapsed state - very compact */
 .chat-tool-card:not(.chat-tool-card--expanded) {
-  max-height: 80px;
+  padding: 8px 12px;
+  max-height: 60px;
 }
 
 /* Expanded state - show full content */
@@ -184,13 +185,22 @@
   margin-top: 4px;
 }
 
+/* Hide status text in collapsed mode */
+.chat-tool-card:not(.chat-tool-card--expanded) .chat-tool-card__status-text {
+  display: none;
+}
+
 .chat-tool-card__detail {
   font-size: 12px;
   color: var(--muted);
   margin-top: 4px;
 }
 
-/* Collapsed preview - compact with truncation */
+/* Collapsed preview - hidden in collapsed mode, shown as compact one-liner when needed */
+.chat-tool-card:not(.chat-tool-card--expanded) .chat-tool-card__preview {
+  display: none;
+}
+
 .chat-tool-card__preview {
   font-size: 11px;
   color: var(--muted);
@@ -279,4 +289,70 @@
     opacity: 1;
     transform: scale(1);
   }
+}
+
+/* Compact inline tool display (for collapsed mode in assistant bubbles) */
+.chat-tool-inline-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.chat-tool-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: var(--secondary);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+
+.chat-tool-inline--clickable {
+  cursor: pointer;
+  transition:
+    background 150ms ease-out,
+    border-color 150ms ease-out;
+}
+
+.chat-tool-inline--clickable:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.chat-tool-inline__icon {
+  display: inline-flex;
+  align-items: center;
+  width: 12px;
+  height: 12px;
+}
+
+.chat-tool-inline__icon svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.5px;
+}
+
+.chat-tool-inline__name {
+  font-weight: 500;
+}
+
+.chat-tool-inline__status {
+  display: inline-flex;
+  align-items: center;
+  color: var(--ok);
+}
+
+.chat-tool-inline__status svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2px;
 }

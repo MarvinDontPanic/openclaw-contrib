@@ -302,30 +302,19 @@ export function renderRateLimitIndicator(state: AppViewState) {
   const defaultModel = modelConfig?.primary as string | undefined;
   const modelName = extractModelName(defaultModel);
 
-  // Get rate limit info
+  // Get rate limit info - only show for providers with actual rate limits
+  // (must have usedPercent > 0, meaning actual usage is being tracked)
+  // This excludes pay-per-token/unlimited providers that show misleading "100%"
   let remainingPercent: number | null = null;
-  let tooltipContent = "";
 
   if (status?.providers?.length) {
-    // Find a provider with meaningful rate limit data:
-    // - Has windows with resetAt (time-bounded limit) OR usedPercent > 0 (actual usage tracked)
-    // This excludes pay-per-token/unlimited providers that show misleading "100%"
-    const activeProvider = status.providers.find((p) =>
-      p.windows?.some((w) => w.resetAt != null || w.usedPercent > 0),
-    );
+    // Find a provider with meaningful usage (actually consumed some quota)
+    const activeProvider = status.providers.find((p) => p.windows?.some((w) => w.usedPercent > 0));
     if (activeProvider) {
-      const window = activeProvider.windows[0];
-      remainingPercent = Math.round(100 - (window?.usedPercent ?? 0));
-
-      // Build tooltip content
-      const tooltipLines = status.providers
-        .filter((p) => p.windows && p.windows.length > 0)
-        .map((p) => {
-          const w = p.windows[0];
-          const pct = Math.round(100 - (w?.usedPercent ?? 0));
-          const reset = formatRateLimitReset(w?.resetAt);
-          return { name: p.displayName, pct, reset };
-        });
+      const window = activeProvider.windows.find((w) => w.usedPercent > 0);
+      if (window) {
+        remainingPercent = Math.round(100 - window.usedPercent);
+      }
     }
   }
 
@@ -336,12 +325,12 @@ export function renderRateLimitIndicator(state: AppViewState) {
     `;
   }
 
-  // Build tooltip rows for custom tooltip
+  // Build tooltip rows - only include providers with actual usage
   const tooltipRows =
     status?.providers
-      ?.filter((p) => p.windows && p.windows.length > 0)
+      ?.filter((p) => p.windows?.some((w) => w.usedPercent > 0))
       .map((p) => {
-        const w = p.windows[0];
+        const w = p.windows.find((w) => w.usedPercent > 0) ?? p.windows[0];
         const pct = Math.round(100 - (w?.usedPercent ?? 0));
         const reset = formatRateLimitReset(w?.resetAt);
         return { name: p.displayName, pct, reset };
@@ -359,18 +348,24 @@ export function renderRateLimitIndicator(state: AppViewState) {
           : ""
       }
       ${remainingPercent !== null ? html`<span class="rate-limit-stat">⏱ ${remainingPercent}%</span>` : ""}
-      <div class="rate-limit-tooltip">
-        ${defaultModel ? html`<div class="rate-limit-tooltip-model">${defaultModel}</div>` : ""}
-        ${tooltipRows.map(
-          (row) => html`
-          <div class="rate-limit-tooltip-row">
-            <span class="rate-limit-tooltip-name">${row.name}</span>
-            <span class="rate-limit-tooltip-pct">${row.pct}% left</span>
-            ${row.reset ? html`<span class="rate-limit-tooltip-reset">(resets ${row.reset})</span>` : ""}
-          </div>
-        `,
-        )}
-      </div>
+      ${
+        tooltipRows.length > 0
+          ? html`
+        <div class="rate-limit-tooltip">
+          ${defaultModel ? html`<div class="rate-limit-tooltip-model">${defaultModel}</div>` : ""}
+          ${tooltipRows.map(
+            (row) => html`
+            <div class="rate-limit-tooltip-row">
+              <span class="rate-limit-tooltip-name">${row.name}</span>
+              <span class="rate-limit-tooltip-pct">${row.pct}% left</span>
+              ${row.reset ? html`<span class="rate-limit-tooltip-reset">(resets ${row.reset})</span>` : ""}
+            </div>
+          `,
+          )}
+        </div>
+      `
+          : ""
+      }
     </span>
   `;
 }
