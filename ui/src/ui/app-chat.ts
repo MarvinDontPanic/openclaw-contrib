@@ -1,21 +1,23 @@
-import type { OpenClawApp } from "./app.ts";
-import type { GatewayHelloOk } from "./gateway.ts";
-import type { ChatAttachment, ChatQueueItem } from "./ui-types.ts";
+import type { OpenClawApp } from "./app";
+import type { GatewayHelloOk } from "./gateway";
+import type { ChatAttachment, ChatQueueItem } from "./ui-types";
 import { parseAgentSessionKey } from "../../../src/sessions/session-key-utils.js";
-import { scheduleChatScroll } from "./app-scroll.ts";
-import { setLastActiveSessionKey } from "./app-settings.ts";
-import { resetToolStream } from "./app-tool-stream.ts";
-import { abortChatRun, loadChatHistory, sendChatMessage } from "./controllers/chat.ts";
-import { loadSessions } from "./controllers/sessions.ts";
-import { normalizeBasePath } from "./navigation.ts";
-import { generateUUID } from "./uuid.ts";
+import { scheduleChatScroll } from "./app-scroll";
+import { setLastActiveSessionKey } from "./app-settings";
+import { resetToolStream } from "./app-tool-stream";
+import { abortChatRun, loadChatHistory, sendChatMessage } from "./controllers/chat";
+import { loadSessions } from "./controllers/sessions";
+import { normalizeBasePath } from "./navigation";
+import { loadQueuedMessages, saveQueuedMessages } from "./queue-storage";
+import { generateUUID } from "./uuid";
 
-export type ChatHost = {
+type ChatHost = {
   connected: boolean;
   chatMessage: string;
   chatAttachments: ChatAttachment[];
   chatQueue: ChatQueueItem[];
   chatRunId: string | null;
+  chatLastActivityAt: number | null;
   chatSending: boolean;
   sessionKey: string;
   basePath: string;
@@ -26,8 +28,28 @@ export type ChatHost = {
 
 export const CHAT_SESSIONS_ACTIVE_MINUTES = 120;
 
+// Clear stuck chatRunId if no activity for this long (milliseconds)
+const CHAT_STALENESS_TIMEOUT_MS = 60_000;
+
 export function isChatBusy(host: ChatHost) {
-  return host.chatSending || Boolean(host.chatRunId);
+  if (host.chatSending) {
+    return true;
+  }
+  if (!host.chatRunId) {
+    return false;
+  }
+  // If chatRunId is set but no activity for a long time, consider it stale
+  // This handles missed "final" events (e.g., tab backgrounded)
+  if (host.chatLastActivityAt != null) {
+    const elapsed = Date.now() - host.chatLastActivityAt;
+    if (elapsed > CHAT_STALENESS_TIMEOUT_MS) {
+      // Clear the stale state
+      host.chatRunId = null;
+      host.chatLastActivityAt = null;
+      return false;
+    }
+  }
+  return true;
 }
 
 export function isChatStopCommand(text: string) {
@@ -89,6 +111,7 @@ function enqueueChatMessage(
       refreshSessions,
     },
   ];
+  saveQueuedMessages(host.sessionKey, host.chatQueue);
 }
 
 async function sendChatMessageNow(
@@ -143,17 +166,20 @@ async function flushChatQueue(host: ChatHost) {
     return;
   }
   host.chatQueue = rest;
+  saveQueuedMessages(host.sessionKey, host.chatQueue);
   const ok = await sendChatMessageNow(host, next.text, {
     attachments: next.attachments,
     refreshSessions: next.refreshSessions,
   });
   if (!ok) {
     host.chatQueue = [next, ...host.chatQueue];
+    saveQueuedMessages(host.sessionKey, host.chatQueue);
   }
 }
 
 export function removeQueuedMessage(host: ChatHost, id: string) {
   host.chatQueue = host.chatQueue.filter((item) => item.id !== id);
+  saveQueuedMessages(host.sessionKey, host.chatQueue);
 }
 
 export async function handleSendChat(

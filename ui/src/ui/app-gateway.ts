@@ -1,32 +1,31 @@
-import type { EventLogEntry } from "./app-events.ts";
-import type { OpenClawApp } from "./app.ts";
-import type { ExecApprovalRequest } from "./controllers/exec-approval.ts";
-import type { GatewayEventFrame, GatewayHelloOk } from "./gateway.ts";
-import type { Tab } from "./navigation.ts";
-import type { UiSettings } from "./storage.ts";
-import type { AgentsListResult, PresenceEntry, HealthSnapshot, StatusSummary } from "./types.ts";
-import { CHAT_SESSIONS_ACTIVE_MINUTES, flushChatQueueForEvent } from "./app-chat.ts";
-import {
-  applySettings,
-  loadCron,
-  refreshActiveTab,
-  setLastActiveSessionKey,
-} from "./app-settings.ts";
-import { handleAgentEvent, resetToolStream, type AgentEventPayload } from "./app-tool-stream.ts";
-import { loadAgents } from "./controllers/agents.ts";
-import { loadAssistantIdentity } from "./controllers/assistant-identity.ts";
-import { loadChatHistory } from "./controllers/chat.ts";
-import { handleChatEvent, type ChatEventPayload } from "./controllers/chat.ts";
-import { loadDevices } from "./controllers/devices.ts";
+import type { OpenClawApp } from "./app";
+import type { EventLogEntry } from "./app-events";
+import type { ExecApprovalRequest } from "./controllers/exec-approval";
+import type { GatewayEventFrame, GatewayHelloOk } from "./gateway";
+import type { Tab } from "./navigation";
+import type { UiSettings } from "./storage";
+import type { AgentsListResult, PresenceEntry, HealthSnapshot, StatusSummary } from "./types";
+import { CHAT_SESSIONS_ACTIVE_MINUTES, flushChatQueueForEvent } from "./app-chat";
+import { applySettings, loadCron, refreshActiveTab, setLastActiveSessionKey } from "./app-settings";
+import { handleAgentEvent, resetToolStream, type AgentEventPayload } from "./app-tool-stream";
+import { loadAgents } from "./controllers/agents";
+import { loadAssistantIdentity } from "./controllers/assistant-identity";
+import { loadChatHistory } from "./controllers/chat";
+import { handleChatEvent, type ChatEventPayload } from "./controllers/chat";
+import { loadConfig } from "./controllers/config";
+import { loadDevices } from "./controllers/devices";
 import {
   addExecApproval,
   parseExecApprovalRequested,
   parseExecApprovalResolved,
   removeExecApproval,
-} from "./controllers/exec-approval.ts";
-import { loadNodes } from "./controllers/nodes.ts";
-import { loadSessions } from "./controllers/sessions.ts";
-import { GatewayBrowserClient } from "./gateway.ts";
+} from "./controllers/exec-approval";
+import { loadModelSwitcher } from "./controllers/model-switcher";
+import { loadNodes } from "./controllers/nodes";
+import { loadRateLimitStatus } from "./controllers/rate-limit";
+import { loadSessions } from "./controllers/sessions";
+import { GatewayBrowserClient } from "./gateway";
+import { loadQueuedMessages } from "./queue-storage";
 
 type GatewayHost = {
   settings: UiSettings;
@@ -51,6 +50,7 @@ type GatewayHost = {
   assistantAgentId: string | null;
   sessionKey: string;
   chatRunId: string | null;
+  chatQueue: import("./ui-types").ChatQueueItem[];
   refreshSessionsAfterChat: Set<string>;
   execApprovalQueue: ExecApprovalRequest[];
   execApprovalError: string | null;
@@ -134,6 +134,8 @@ export function connectGateway(host: GatewayHost) {
       host.lastError = null;
       host.hello = hello;
       applySnapshot(host, hello);
+      // Restore persisted chat queue for the current session
+      host.chatQueue = loadQueuedMessages(host.sessionKey);
       // Reset orphaned chat run state from before disconnect.
       // Any in-flight run's final event was lost during the disconnect window.
       host.chatRunId = null;
@@ -144,6 +146,9 @@ export function connectGateway(host: GatewayHost) {
       void loadAgents(host as unknown as OpenClawApp);
       void loadNodes(host as unknown as OpenClawApp, { quiet: true });
       void loadDevices(host as unknown as OpenClawApp, { quiet: true });
+      void loadConfig(host as unknown as OpenClawApp);
+      void loadRateLimitStatus(host as unknown as OpenClawApp);
+      void loadModelSwitcher(host as unknown as OpenClawApp);
       void refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0]);
     },
     onClose: ({ code, reason }) => {

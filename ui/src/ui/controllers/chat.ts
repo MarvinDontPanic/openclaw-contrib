@@ -16,6 +16,7 @@ export type ChatState = {
   chatRunId: string | null;
   chatStream: string | null;
   chatStreamStartedAt: number | null;
+  chatLastActivityAt: number | null;
   lastError: string | null;
 };
 
@@ -104,6 +105,7 @@ export async function sendChatMessage(
   state.chatRunId = runId;
   state.chatStream = "";
   state.chatStreamStartedAt = now;
+  state.chatLastActivityAt = now;
 
   // Convert attachments to API format
   const apiAttachments = hasAttachments
@@ -185,6 +187,9 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
     return null;
   }
 
+  // Track last activity for staleness detection
+  state.chatLastActivityAt = Date.now();
+
   if (payload.state === "delta") {
     const next = extractText(payload.message);
     if (typeof next === "string") {
@@ -197,14 +202,17 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
     state.chatStream = null;
     state.chatRunId = null;
     state.chatStreamStartedAt = null;
+    state.chatLastActivityAt = null;
   } else if (payload.state === "aborted") {
     state.chatStream = null;
     state.chatRunId = null;
     state.chatStreamStartedAt = null;
+    state.chatLastActivityAt = null;
   } else if (payload.state === "error") {
     state.chatStream = null;
     state.chatRunId = null;
     state.chatStreamStartedAt = null;
+    state.chatLastActivityAt = null;
     state.lastError = payload.errorMessage ?? "chat error";
   }
   return payload.state;

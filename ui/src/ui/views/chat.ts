@@ -187,7 +187,9 @@ function renderAttachmentPreview(props: ChatProps) {
 
 export function renderChat(props: ChatProps) {
   const canCompose = props.connected;
-  const isBusy = props.sending || props.stream !== null;
+  // Unify busy state: include canAbort to match isChatBusy() in app-chat.ts
+  // This prevents "Queue" showing when chatRunId is stuck but stream is null
+  const isBusy = props.sending || props.stream !== null || props.canAbort;
   const canAbort = Boolean(props.canAbort && props.onAbort);
   const activeSession = props.sessions?.sessions?.find((row) => row.key === props.sessionKey);
   const reasoningLevel = activeSession?.reasoningLevel ?? "off";
