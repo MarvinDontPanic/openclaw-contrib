@@ -8,6 +8,7 @@ import type { SessionsListResult } from "./types";
 import { refreshChat } from "./app-chat";
 import { syncUrlWithSessionKey } from "./app-settings";
 import { loadChatHistory } from "./controllers/chat";
+import { getModelsForProvider } from "./controllers/model-switcher";
 import { icons } from "./icons";
 import { iconForTab, pathForTab, titleForTab, type Tab } from "./navigation";
 
@@ -284,34 +285,22 @@ function formatRateLimitReset(resetAt: number | undefined): string {
   return `${mins}m`;
 }
 
-function extractModelName(fullModel: string | undefined): string {
-  if (!fullModel) return "";
-  // Handle "provider/model" format - return just the model part
-  const parts = fullModel.split("/");
-  return parts[parts.length - 1] || fullModel;
-}
-
 export function renderRateLimitIndicator(state: AppViewState) {
   const status = state.rateLimitStatus;
 
-  // Get model name from config snapshot (nested structure)
-  const config = state.configSnapshot?.config as Record<string, unknown> | undefined;
-  const agents = config?.agents as Record<string, unknown> | undefined;
-  const defaults = agents?.defaults as Record<string, unknown> | undefined;
-  const modelConfig = defaults?.model as Record<string, unknown> | undefined;
-  const defaultModel = modelConfig?.primary as string | undefined;
-  const modelName = extractModelName(defaultModel);
-
   // Get rate limit info - only show for providers with actual rate limits
-  // (must have usedPercent > 0, meaning actual usage is being tracked)
-  // This excludes pay-per-token/unlimited providers that show misleading "100%"
+  // A window is meaningful if it has: usedPercent > 0 (consumed quota) OR resetAt (time-based quota)
+  // This excludes pay-per-token/unlimited providers while including fresh quotas
   let remainingPercent: number | null = null;
 
+  const hasMeaningfulQuota = (w: { usedPercent: number; resetAt?: number }) =>
+    w.usedPercent > 0 || w.resetAt !== undefined;
+
   if (status?.providers?.length) {
-    // Find a provider with meaningful usage (actually consumed some quota)
-    const activeProvider = status.providers.find((p) => p.windows?.some((w) => w.usedPercent > 0));
+    // Find a provider with meaningful quota (consumed some OR has a reset time)
+    const activeProvider = status.providers.find((p) => p.windows?.some(hasMeaningfulQuota));
     if (activeProvider) {
-      const window = activeProvider.windows.find((w) => w.usedPercent > 0);
+      const window = activeProvider.windows.find(hasMeaningfulQuota);
       if (window) {
         remainingPercent = Math.round(100 - window.usedPercent);
       }
@@ -319,18 +308,18 @@ export function renderRateLimitIndicator(state: AppViewState) {
   }
 
   // If we have nothing to show, return empty
-  if (!modelName && remainingPercent === null) {
+  if (remainingPercent === null) {
     return html`
       
     `;
   }
 
-  // Build tooltip rows - only include providers with actual usage
+  // Build tooltip rows - include providers with meaningful quotas
   const tooltipRows =
     status?.providers
-      ?.filter((p) => p.windows?.some((w) => w.usedPercent > 0))
+      ?.filter((p) => p.windows?.some(hasMeaningfulQuota))
       .map((p) => {
-        const w = p.windows.find((w) => w.usedPercent > 0) ?? p.windows[0];
+        const w = p.windows.find(hasMeaningfulQuota) ?? p.windows[0];
         const pct = Math.round(100 - (w?.usedPercent ?? 0));
         const reset = formatRateLimitReset(w?.resetAt);
         return { name: p.displayName, pct, reset };
@@ -339,20 +328,17 @@ export function renderRateLimitIndicator(state: AppViewState) {
   return html`
     <span class="status-divider">·</span>
     <span class="rate-limit-info">
-      ${modelName ? html`<span class="rate-limit-model">${modelName}</span>` : ""}
-      ${
-        modelName && remainingPercent !== null
-          ? html`
-              <span class="status-divider">·</span>
-            `
-          : ""
-      }
-      ${remainingPercent !== null ? html`<span class="rate-limit-stat">⏱ ${remainingPercent}%</span>` : ""}
+      <span class="rate-limit-stat">${state.runningModel ?? "no model"}</span>
+      <span class="status-divider">·</span>
+      <span class="rate-limit-stat">⏱ ${remainingPercent}%</span>
       ${
         tooltipRows.length > 0
           ? html`
         <div class="rate-limit-tooltip">
-          ${defaultModel ? html`<div class="rate-limit-tooltip-model">${defaultModel}</div>` : ""}
+          <div class="rate-limit-tooltip-row">
+            <span class="rate-limit-tooltip-name">Model</span>
+            <span class="rate-limit-tooltip-pct">${state.runningProvider}/${state.runningModel}</span>
+          </div>
           ${tooltipRows.map(
             (row) => html`
             <div class="rate-limit-tooltip-row">
@@ -367,6 +353,130 @@ export function renderRateLimitIndicator(state: AppViewState) {
           : ""
       }
     </span>
+  `;
+}
+
+export function renderModelSwitcher(state: AppViewState) {
+  const providers = state.modelSwitcherProviders;
+  const selectedProvider = state.selectedProvider;
+  const selectedModel = state.selectedModel;
+  const isDirty = state.modelConfigDirty;
+  const isSaving = state.modelSwitcherSaving;
+  const isLoading = state.modelSwitcherLoading;
+
+  // If no providers configured, show nothing
+  if (!providers.length && !isLoading) {
+    return html`
+      
+    `;
+  }
+
+  // Get models for the selected provider
+  const { favorites, others } = selectedProvider
+    ? getModelsForProvider(state, selectedProvider)
+    : { favorites: [], others: [] };
+
+  // Format billing indicator: $ for pay-per-use
+  const getBillingIndicator = (billingType: string) => {
+    if (billingType === "pay-per-use") return " $";
+    return "";
+  };
+
+  return html`
+    <div class="model-switcher ${isDirty ? "model-switcher--dirty" : ""}">
+      <!-- Provider dropdown -->
+      <select
+        class="model-switcher__provider"
+        .value=${selectedProvider ?? ""}
+        ?disabled=${isLoading || isSaving || !state.connected}
+        @change=${(e: Event) => {
+          const value = (e.target as HTMLSelectElement).value;
+          state.handleProviderChange(value);
+        }}
+        aria-label="Select provider"
+      >
+        ${
+          !selectedProvider
+            ? html`
+                <option value="" disabled>Provider...</option>
+              `
+            : ""
+        }
+        ${providers.map(
+          (p) => html`
+          <option value=${p.id} ?selected=${p.id === selectedProvider}>
+            ${p.displayName}${getBillingIndicator(p.billingType)}${p.authStatus !== "ok" && p.authStatus !== "static" ? ` (${p.authStatus})` : ""}
+          </option>
+        `,
+        )}
+      </select>
+
+      <!-- Model dropdown - uses raw model IDs -->
+      <select
+        class="model-switcher__model"
+        .value=${selectedModel ?? ""}
+        ?disabled=${isLoading || isSaving || !state.connected || !selectedProvider}
+        @change=${(e: Event) => {
+          const value = (e.target as HTMLSelectElement).value;
+          state.handleModelChange(value);
+        }}
+        aria-label="Select model"
+      >
+        ${
+          !selectedModel
+            ? html`
+                <option value="" disabled>Model...</option>
+              `
+            : ""
+        }
+        ${
+          favorites.length > 0
+            ? html`
+          <optgroup label="★ Favorites">
+            ${favorites.map(
+              (m) => html`
+              <option value=${m.id} ?selected=${m.id === selectedModel}>
+                ${m.id}
+              </option>
+            `,
+            )}
+          </optgroup>
+        `
+            : ""
+        }
+        ${
+          others.length > 0
+            ? html`
+          <optgroup label="${favorites.length > 0 ? "Other" : "Models"}">
+            ${others.map(
+              (m) => html`
+              <option value=${m.id} ?selected=${m.id === selectedModel}>
+                ${m.id}
+              </option>
+            `,
+            )}
+          </optgroup>
+        `
+            : ""
+        }
+      </select>
+
+      <!-- Restart button (only shown when dirty) -->
+      ${
+        isDirty
+          ? html`
+        <button
+          class="model-switcher__restart"
+          ?disabled=${isSaving || !state.connected}
+          @click=${() => state.handleModelSwitcherRestart()}
+          title="Save config and restart gateway"
+        >
+          ${isSaving ? "Restarting..." : "Restart"}
+        </button>
+      `
+          : ""
+      }
+    </div>
   `;
 }
 

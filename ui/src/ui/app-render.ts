@@ -4,6 +4,7 @@ import { parseAgentSessionKey } from "../../../src/routing/session-key.js";
 import { refreshChatAvatar } from "./app-chat";
 import {
   renderChatControls,
+  renderModelSwitcher,
   renderRateLimitIndicator,
   renderTab,
   renderThemeToggle,
@@ -125,6 +126,7 @@ export function renderApp(state: AppViewState) {
           </div>
         </div>
         <div class="topbar-status">
+          ${renderModelSwitcher(state)}
           <div class="pill">
             <span class="statusDot ${state.connected ? "ok" : ""}"></span>
             <span>Health</span>

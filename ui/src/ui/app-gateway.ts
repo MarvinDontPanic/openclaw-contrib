@@ -20,6 +20,7 @@ import {
   parseExecApprovalResolved,
   removeExecApproval,
 } from "./controllers/exec-approval";
+import { loadModelSwitcher } from "./controllers/model-switcher";
 import { loadNodes } from "./controllers/nodes";
 import { loadRateLimitStatus } from "./controllers/rate-limit";
 import { loadSessions } from "./controllers/sessions";
@@ -143,6 +144,7 @@ export function connectGateway(host: GatewayHost) {
       void loadDevices(host as unknown as OpenClawApp, { quiet: true });
       void loadConfig(host as unknown as OpenClawApp);
       void loadRateLimitStatus(host as unknown as OpenClawApp);
+      void loadModelSwitcher(host as unknown as OpenClawApp);
       void refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0]);
     },
     onClose: ({ code, reason }) => {

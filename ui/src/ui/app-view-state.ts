@@ -2,6 +2,7 @@ import type { EventLogEntry } from "./app-events";
 import type { DevicePairingList } from "./controllers/devices";
 import type { ExecApprovalRequest } from "./controllers/exec-approval";
 import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "./controllers/exec-approvals";
+import type { ModelCatalogEntry, ProviderInfo } from "./controllers/model-switcher";
 import type { SkillMessage } from "./controllers/skills";
 import type { GatewayBrowserClient, GatewayHelloOk } from "./gateway";
 import type { Tab } from "./navigation";
@@ -124,6 +125,19 @@ export type AppViewState = {
   usageDisplayMode: "cost" | "tokens";
   usageGroupBy: "none" | "provider" | "model" | "type";
   rateLimitStatus: RateLimitStatus | null;
+  // Model switcher state
+  modelSwitcherProviders: ProviderInfo[];
+  modelSwitcherModels: ModelCatalogEntry[];
+  selectedProvider: string | null;
+  selectedModel: string | null;
+  runningProvider: string | null;
+  runningModel: string | null;
+  modelSwitcherLoading: boolean;
+  modelSwitcherSaving: boolean;
+  modelSwitcherError: string | null;
+  modelConfigDirty: boolean;
+  configBaseHash: string | null;
+  favoriteModels: string[];
   cronLoading: boolean;
   cronJobs: CronJob[];
   cronStatus: CronStatus | null;
@@ -216,4 +230,10 @@ export type AppViewState = {
   handleLogsLevelFilterToggle: (level: LogLevel) => void;
   handleLogsAutoFollowToggle: (next: boolean) => void;
   handleCallDebugMethod: (method: string, params: string) => Promise<void>;
+  // Model switcher handlers
+  handleModelSwitcherLoad: () => Promise<void>;
+  handleProviderChange: (provider: string) => void;
+  handleModelChange: (model: string) => void;
+  handleModelSwitcherSave: () => Promise<void>;
+  handleModelSwitcherRestart: () => Promise<void>;
 };

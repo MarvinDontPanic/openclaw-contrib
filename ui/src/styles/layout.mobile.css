@@ -94,6 +94,15 @@
     display: none;
   }
 
+  /* Model switcher mobile */
+  .model-switcher {
+    display: none;
+  }
+
+  .model-running-indicator {
+    display: none;
+  }
+
   /* Nav */
   .nav {
     padding: 8px 10px;

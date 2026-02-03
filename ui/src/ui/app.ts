@@ -1,18 +1,15 @@
 import { LitElement } from "lit";
 import { customElement, state } from "lit/decorators.js";
-import type { EventLogEntry } from "./app-events.ts";
-import type { AppViewState } from "./app-view-state.ts";
-import type { DevicePairingList } from "./controllers/devices.ts";
-import type { ExecApprovalRequest } from "./controllers/exec-approval.ts";
-import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "./controllers/exec-approvals.ts";
-import type { SkillMessage } from "./controllers/skills.ts";
-import type { GatewayBrowserClient, GatewayHelloOk } from "./gateway.ts";
-import type { Tab } from "./navigation.ts";
-import type { ResolvedTheme, ThemeMode } from "./theme.ts";
+import type { EventLogEntry } from "./app-events";
+import type { AppViewState } from "./app-view-state";
+import type { DevicePairingList } from "./controllers/devices";
+import type { ExecApprovalRequest } from "./controllers/exec-approval";
+import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "./controllers/exec-approvals";
+import type { GatewayBrowserClient, GatewayHelloOk } from "./gateway";
+import type { Tab } from "./navigation";
+import type { ResolvedTheme, ThemeMode } from "./theme";
 import type {
   AgentsListResult,
-  AgentsFilesListResult,
-  AgentIdentityResult,
   ConfigSnapshot,
   ConfigUiHints,
   CronJob,
@@ -28,8 +25,8 @@ import type {
   SkillStatusReport,
   StatusSummary,
   NostrProfile,
-} from "./types.ts";
-import type { NostrProfileFormState } from "./views/channels.nostr-profile-form.ts";
+} from "./types";
+import type { NostrProfileFormState } from "./views/channels.nostr-profile-form";
 import {
   handleChannelConfigReload as handleChannelConfigReloadInternal,
   handleChannelConfigSave as handleChannelConfigSaveInternal,
@@ -42,28 +39,28 @@ import {
   handleWhatsAppLogout as handleWhatsAppLogoutInternal,
   handleWhatsAppStart as handleWhatsAppStartInternal,
   handleWhatsAppWait as handleWhatsAppWaitInternal,
-} from "./app-channels.ts";
+} from "./app-channels";
 import {
   handleAbortChat as handleAbortChatInternal,
   handleSendChat as handleSendChatInternal,
   removeQueuedMessage as removeQueuedMessageInternal,
-} from "./app-chat.ts";
-import { DEFAULT_CRON_FORM, DEFAULT_LOG_LEVEL_FILTERS } from "./app-defaults.ts";
-import { connectGateway as connectGatewayInternal } from "./app-gateway.ts";
+} from "./app-chat";
+import { DEFAULT_CRON_FORM, DEFAULT_LOG_LEVEL_FILTERS } from "./app-defaults";
+import { connectGateway as connectGatewayInternal } from "./app-gateway";
 import {
   handleConnected,
   handleDisconnected,
   handleFirstUpdated,
   handleUpdated,
-} from "./app-lifecycle.ts";
-import { renderApp } from "./app-render.ts";
+} from "./app-lifecycle";
+import { renderApp } from "./app-render";
 import {
   exportLogs as exportLogsInternal,
   handleChatScroll as handleChatScrollInternal,
   handleLogsScroll as handleLogsScrollInternal,
   resetChatScroll as resetChatScrollInternal,
   scheduleChatScroll as scheduleChatScrollInternal,
-} from "./app-scroll.ts";
+} from "./app-scroll";
 import {
   applySettings as applySettingsInternal,
   loadCron as loadCronInternal,
@@ -71,15 +68,22 @@ import {
   setTab as setTabInternal,
   setTheme as setThemeInternal,
   onPopState as onPopStateInternal,
-} from "./app-settings.ts";
+} from "./app-settings";
 import {
   resetToolStream as resetToolStreamInternal,
   type ToolStreamEntry,
-} from "./app-tool-stream.ts";
-import { resolveInjectedAssistantIdentity } from "./assistant-identity.ts";
-import { loadAssistantIdentity as loadAssistantIdentityInternal } from "./controllers/assistant-identity.ts";
-import { loadSettings, type UiSettings } from "./storage.ts";
-import { type ChatAttachment, type ChatQueueItem, type CronFormState } from "./ui-types.ts";
+} from "./app-tool-stream";
+import { resolveInjectedAssistantIdentity } from "./assistant-identity";
+import { loadAssistantIdentity as loadAssistantIdentityInternal } from "./controllers/assistant-identity";
+import {
+  loadModelSwitcher as loadModelSwitcherInternal,
+  setSelectedProvider as setSelectedProviderInternal,
+  setSelectedModel as setSelectedModelInternal,
+  saveModelSelection as saveModelSelectionInternal,
+  type ModelSwitcherState,
+} from "./controllers/model-switcher";
+import { loadSettings, type UiSettings } from "./storage";
+import { type ChatAttachment, type ChatQueueItem, type CronFormState } from "./ui-types";
 
 declare global {
   interface Window {
@@ -130,7 +134,6 @@ export class OpenClawApp extends LitElement {
   @state() chatToolMessages: unknown[] = [];
   @state() chatStream: string | null = null;
   @state() chatStreamStartedAt: number | null = null;
-  @state() chatStreamSegments: Array<{ text: string; ts: number }> = [];
   @state() chatRunId: string | null = null;
   @state() chatLastActivityAt: number | null = null;
   @state() compactionStatus: import("./app-tool-stream.ts").CompactionStatus | null = null;
@@ -205,23 +208,6 @@ export class OpenClawApp extends LitElement {
   @state() agentsLoading = false;
   @state() agentsList: AgentsListResult | null = null;
   @state() agentsError: string | null = null;
-  @state() agentsSelectedId: string | null = null;
-  @state() agentsPanel: "overview" | "files" | "tools" | "skills" | "channels" | "cron" =
-    "overview";
-  @state() agentFilesLoading = false;
-  @state() agentFilesError: string | null = null;
-  @state() agentFilesList: AgentsFilesListResult | null = null;
-  @state() agentFileContents: Record<string, string> = {};
-  @state() agentFileDrafts: Record<string, string> = {};
-  @state() agentFileActive: string | null = null;
-  @state() agentFileSaving = false;
-  @state() agentIdentityLoading = false;
-  @state() agentIdentityError: string | null = null;
-  @state() agentIdentityById: Record<string, AgentIdentityResult> = {};
-  @state() agentSkillsLoading = false;
-  @state() agentSkillsError: string | null = null;
-  @state() agentSkillsReport: SkillStatusReport | null = null;
-  @state() agentSkillsAgentId: string | null = null;
 
   @state() sessionsLoading = false;
   @state() sessionsResult: SessionsListResult | null = null;
@@ -238,6 +224,20 @@ export class OpenClawApp extends LitElement {
   @state() usageDisplayMode: "cost" | "tokens" = "cost";
   @state() usageGroupBy: "none" | "provider" | "model" | "type" = "none";
   @state() rateLimitStatus: RateLimitStatus | null = null;
+
+  // Model switcher state
+  @state() modelSwitcherProviders: import("./controllers/model-switcher").ProviderInfo[] = [];
+  @state() modelSwitcherModels: import("./controllers/model-switcher").ModelCatalogEntry[] = [];
+  @state() selectedProvider: string | null = null;
+  @state() selectedModel: string | null = null;
+  @state() runningProvider: string | null = null;
+  @state() runningModel: string | null = null;
+  @state() modelSwitcherLoading = false;
+  @state() modelSwitcherSaving = false;
+  @state() modelSwitcherError: string | null = null;
+  @state() modelConfigDirty = false;
+  @state() configBaseHash: string | null = null;
+  @state() favoriteModels: string[] = [];
 
   @state() cronLoading = false;
   @state() cronJobs: CronJob[] = [];
@@ -520,6 +520,36 @@ export class OpenClawApp extends LitElement {
     const newRatio = Math.max(0.4, Math.min(0.7, ratio));
     this.splitRatio = newRatio;
     this.applySettings({ ...this.settings, splitRatio: newRatio });
+  }
+
+  // Model switcher handlers
+  async handleModelSwitcherLoad() {
+    await loadModelSwitcherInternal(this as unknown as ModelSwitcherState);
+  }
+
+  handleProviderChange(provider: string) {
+    setSelectedProviderInternal(this as unknown as ModelSwitcherState, provider);
+  }
+
+  handleModelChange(model: string) {
+    setSelectedModelInternal(this as unknown as ModelSwitcherState, model);
+  }
+
+  async handleModelSwitcherSave() {
+    const success = await saveModelSelectionInternal(this as unknown as ModelSwitcherState);
+    if (success) {
+      // Config is saved but gateway needs restart - dirty flag remains true
+      // until gateway restarts and new config is loaded
+    }
+  }
+
+  async handleModelSwitcherRestart() {
+    // Save config and restart (config.patch with restartDelayMs triggers restart)
+    if (this.modelConfigDirty) {
+      await saveModelSelectionInternal(this as unknown as ModelSwitcherState);
+      // config.patch schedules a SIGUSR1 restart automatically
+      // The UI will reconnect after the gateway restarts
+    }
   }
 
   render() {
